@@ -1,0 +1,333 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8bc7aff47983f114883a2daaaf50f68b, type: 3}
+  m_Name: LevelData
+  m_EditorClassIdentifier: Assembly-CSharp::LevelData
+  width: 8
+  height: 8
+  moveLimit: 13
+  playerStart: {x: 6, y: 1}
+  goal: {x: 3, y: 6}
+  objects:
+  - id: 115
+    type: 0
+    x: 3
+    y: 7
+  - id: 116
+    type: 0
+    x: 3
+    y: 6
+  - id: 117
+    type: 0
+    x: 3
+    y: 5
+  - id: 118
+    type: 0
+    x: 2
+    y: 5
+  - id: 119
+    type: 0
+    x: 2
+    y: 4
+  - id: 120
+    type: 0
+    x: 1
+    y: 4
+  - id: 121
+    type: 0
+    x: 1
+    y: 3
+  - id: 122
+    type: 0
+    x: 2
+    y: 3
+  - id: 123
+    type: 0
+    x: 2
+    y: 2
+  - id: 124
+    type: 0
+    x: 3
+    y: 2
+  - id: 125
+    type: 0
+    x: 4
+    y: 2
+  - id: 126
+    type: 0
+    x: 4
+    y: 3
+  - id: 127
+    type: 0
+    x: 5
+    y: 3
+  - id: 128
+    type: 0
+    x: 6
+    y: 3
+  - id: 129
+    type: 0
+    x: 6
+    y: 2
+  - id: 130
+    type: 0
+    x: 6
+    y: 1
+  - id: 131
+    type: 0
+    x: 5
+    y: 1
+  - id: 132
+    type: 0
+    x: 4
+    y: 1
+  - id: 133
+    type: 0
+    x: 3
+    y: 1
+  - id: 134
+    type: 0
+    x: 6
+    y: 4
+  - id: 135
+    type: 0
+    x: 6
+    y: 5
+  - id: 136
+    type: 0
+    x: 5
+    y: 5
+  - id: 137
+    type: 0
+    x: 4
+    y: 5
+  - id: 138
+    type: 0
+    x: 4
+    y: 4
+  - id: 139
+    type: 0
+    x: 3
+    y: 3
+  - id: 140
+    type: 0
+    x: 5
+    y: 4
+  - id: 141
+    type: 0
+    x: 3
+    y: 4
+  - id: 142
+    type: 0
+    x: 5
+    y: 2
+  - id: 144
+    type: 9
+    x: 4
+    y: 4
+  - id: 145
+    type: 9
+    x: 5
+    y: 4
+  - id: 146
+    type: 6
+    x: 6
+    y: 5
+  - id: 147
+    type: 4
+    x: 6
+    y: 4
+  - id: 149
+    type: 3
+    x: 6
+    y: 1
+  - id: 150
+    type: 9
+    x: 3
+    y: 5
+  - id: 151
+    type: 1
+    x: 4
+    y: 7
+  - id: 152
+    type: 1
+    x: 5
+    y: 7
+  - id: 153
+    type: 1
+    x: 6
+    y: 7
+  - id: 154
+    type: 1
+    x: 7
+    y: 7
+  - id: 155
+    type: 1
+    x: 7
+    y: 6
+  - id: 156
+    type: 1
+    x: 7
+    y: 5
+  - id: 157
+    type: 1
+    x: 7
+    y: 4
+  - id: 158
+    type: 1
+    x: 7
+    y: 3
+  - id: 159
+    type: 1
+    x: 7
+    y: 2
+  - id: 160
+    type: 1
+    x: 7
+    y: 1
+  - id: 161
+    type: 1
+    x: 7
+    y: 0
+  - id: 162
+    type: 1
+    x: 6
+    y: 0
+  - id: 163
+    type: 1
+    x: 5
+    y: 0
+  - id: 164
+    type: 1
+    x: 4
+    y: 0
+  - id: 165
+    type: 1
+    x: 3
+    y: 0
+  - id: 166
+    type: 1
+    x: 2
+    y: 0
+  - id: 167
+    type: 1
+    x: 1
+    y: 0
+  - id: 168
+    type: 1
+    x: 0
+    y: 0
+  - id: 169
+    type: 1
+    x: 0
+    y: 1
+  - id: 170
+    type: 1
+    x: 0
+    y: 2
+  - id: 171
+    type: 1
+    x: 0
+    y: 3
+  - id: 172
+    type: 1
+    x: 0
+    y: 4
+  - id: 173
+    type: 1
+    x: 0
+    y: 5
+  - id: 174
+    type: 1
+    x: 0
+    y: 6
+  - id: 175
+    type: 1
+    x: 0
+    y: 7
+  - id: 176
+    type: 1
+    x: 1
+    y: 7
+  - id: 177
+    type: 1
+    x: 2
+    y: 7
+  - id: 178
+    type: 8
+    x: 3
+    y: 6
+  - id: 179
+    type: 1
+    x: 3
+    y: 7
+  - id: 180
+    type: 1
+    x: 6
+    y: 6
+  - id: 181
+    type: 1
+    x: 3
+    y: 3
+  - id: 182
+    type: 1
+    x: 5
+    y: 6
+  - id: 183
+    type: 1
+    x: 5
+    y: 5
+  - id: 184
+    type: 1
+    x: 6
+    y: 3
+  - id: 185
+    type: 1
+    x: 6
+    y: 2
+  - id: 186
+    type: 1
+    x: 4
+    y: 5
+  - id: 187
+    type: 1
+    x: 3
+    y: 4
+  - id: 188
+    type: 1
+    x: 2
+    y: 3
+  - id: 189
+    type: 1
+    x: 2
+    y: 2
+  - id: 190
+    type: 1
+    x: 3
+    y: 2
+  - id: 191
+    type: 1
+    x: 4
+    y: 2
+  - id: 192
+    type: 1
+    x: 5
+    y: 1
+  - id: 193
+    type: 1
+    x: 2
+    y: 4
+  - id: 194
+    type: 1
+    x: 2
+    y: 1
+  nextObjectId: 195

@@ -1,0 +1,249 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8bc7aff47983f114883a2daaaf50f68b, type: 3}
+  m_Name: LevelData_4
+  m_EditorClassIdentifier: Assembly-CSharp::LevelData
+  width: 10
+  height: 12
+  moveLimit: 55
+  playerStart: {x: 2, y: 2}
+  goal: {x: 5, y: 11}
+  objects:
+  - id: 1
+    type: 0
+    x: 5
+    y: 8
+  - id: 2
+    type: 0
+    x: 4
+    y: 7
+  - id: 3
+    type: 0
+    x: 5
+    y: 7
+  - id: 4
+    type: 0
+    x: 5
+    y: 6
+  - id: 5
+    type: 0
+    x: 6
+    y: 5
+  - id: 6
+    type: 0
+    x: 5
+    y: 5
+  - id: 7
+    type: 0
+    x: 4
+    y: 6
+  - id: 8
+    type: 0
+    x: 3
+    y: 6
+  - id: 9
+    type: 0
+    x: 3
+    y: 5
+  - id: 10
+    type: 0
+    x: 2
+    y: 5
+  - id: 11
+    type: 0
+    x: 2
+    y: 6
+  - id: 12
+    type: 0
+    x: 1
+    y: 6
+  - id: 13
+    type: 0
+    x: 1
+    y: 7
+  - id: 14
+    type: 0
+    x: 2
+    y: 7
+  - id: 15
+    type: 0
+    x: 3
+    y: 7
+  - id: 16
+    type: 0
+    x: 4
+    y: 5
+  - id: 17
+    type: 0
+    x: 4
+    y: 4
+  - id: 18
+    type: 0
+    x: 4
+    y: 3
+  - id: 19
+    type: 0
+    x: 3
+    y: 3
+  - id: 20
+    type: 0
+    x: 3
+    y: 2
+  - id: 21
+    type: 0
+    x: 4
+    y: 2
+  - id: 22
+    type: 0
+    x: 4
+    y: 1
+  - id: 23
+    type: 0
+    x: 5
+    y: 2
+  - id: 24
+    type: 0
+    x: 5
+    y: 3
+  - id: 25
+    type: 0
+    x: 5
+    y: 4
+  - id: 26
+    type: 0
+    x: 6
+    y: 6
+  - id: 27
+    type: 0
+    x: 6
+    y: 7
+  - id: 28
+    type: 0
+    x: 6
+    y: 8
+  - id: 29
+    type: 0
+    x: 6
+    y: 9
+  - id: 30
+    type: 0
+    x: 7
+    y: 6
+  - id: 31
+    type: 0
+    x: 7
+    y: 5
+  - id: 32
+    type: 0
+    x: 8
+    y: 5
+  - id: 33
+    type: 0
+    x: 8
+    y: 6
+  - id: 34
+    type: 0
+    x: 8
+    y: 7
+  - id: 35
+    type: 0
+    x: 8
+    y: 8
+  - id: 36
+    type: 0
+    x: 8
+    y: 9
+  - id: 37
+    type: 0
+    x: 7
+    y: 9
+  - id: 38
+    type: 0
+    x: 6
+    y: 10
+  - id: 39
+    type: 0
+    x: 5
+    y: 10
+  - id: 40
+    type: 0
+    x: 6
+    y: 11
+  - id: 41
+    type: 0
+    x: 5
+    y: 11
+  - id: 42
+    type: 0
+    x: 5
+    y: 9
+  - id: 43
+    type: 0
+    x: 7
+    y: 8
+  - id: 44
+    type: 0
+    x: 7
+    y: 7
+  - id: 45
+    type: 0
+    x: 4
+    y: 8
+  - id: 46
+    type: 0
+    x: 4
+    y: 9
+  - id: 47
+    type: 0
+    x: 4
+    y: 10
+  - id: 48
+    type: 8
+    x: 5
+    y: 11
+  - id: 49
+    type: 0
+    x: 2
+    y: 4
+  - id: 50
+    type: 0
+    x: 2
+    y: 3
+  - id: 51
+    type: 0
+    x: 2
+    y: 2
+  - id: 52
+    type: 0
+    x: 1
+    y: 2
+  - id: 53
+    type: 0
+    x: 0
+    y: 2
+  - id: 55
+    type: 3
+    x: 2
+    y: 2
+  - id: 62
+    type: 9
+    x: 1
+    y: 7
+  - id: 63
+    type: 4
+    x: 1
+    y: 6
+  - id: 64
+    type: 5
+    x: 6
+    y: 10
+  nextObjectId: 65
