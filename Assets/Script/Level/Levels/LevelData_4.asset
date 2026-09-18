@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::LevelData
   width: 10
   height: 12
-  moveLimit: 55
+  moveLimit: 16
   playerStart: {x: 2, y: 2}
   goal: {x: 5, y: 11}
   objects:
