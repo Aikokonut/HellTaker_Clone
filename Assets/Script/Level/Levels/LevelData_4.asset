@@ -12,238 +12,574 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8bc7aff47983f114883a2daaaf50f68b, type: 3}
   m_Name: LevelData_4
   m_EditorClassIdentifier: Assembly-CSharp::LevelData
-  width: 10
-  height: 12
-  moveLimit: 16
-  playerStart: {x: 2, y: 2}
-  goal: {x: 5, y: 11}
+  width: 11
+  height: 7
+  moveLimit: 23
+  playerStart: {x: 1, y: 5}
+  goal: {x: 7, y: 3}
   objects:
-  - id: 1
+  - id: 101
     type: 0
-    x: 5
-    y: 8
-  - id: 2
-    type: 0
-    x: 4
-    y: 7
-  - id: 3
-    type: 0
-    x: 5
-    y: 7
-  - id: 4
-    type: 0
-    x: 5
+    x: 7
     y: 6
-  - id: 5
+  - id: 102
+    type: 0
+    x: 7
+    y: 5
+  - id: 103
     type: 0
     x: 6
     y: 5
-  - id: 6
+  - id: 104
     type: 0
     x: 5
     y: 5
-  - id: 7
-    type: 0
-    x: 4
-    y: 6
-  - id: 8
-    type: 0
-    x: 3
-    y: 6
-  - id: 9
-    type: 0
-    x: 3
-    y: 5
-  - id: 10
-    type: 0
-    x: 2
-    y: 5
-  - id: 11
-    type: 0
-    x: 2
-    y: 6
-  - id: 12
-    type: 0
-    x: 1
-    y: 6
-  - id: 13
-    type: 0
-    x: 1
-    y: 7
-  - id: 14
-    type: 0
-    x: 2
-    y: 7
-  - id: 15
-    type: 0
-    x: 3
-    y: 7
-  - id: 16
-    type: 0
-    x: 4
-    y: 5
-  - id: 17
-    type: 0
-    x: 4
-    y: 4
-  - id: 18
-    type: 0
-    x: 4
-    y: 3
-  - id: 19
-    type: 0
-    x: 3
-    y: 3
-  - id: 20
-    type: 0
-    x: 3
-    y: 2
-  - id: 21
-    type: 0
-    x: 4
-    y: 2
-  - id: 22
-    type: 0
-    x: 4
-    y: 1
-  - id: 23
-    type: 0
-    x: 5
-    y: 2
-  - id: 24
-    type: 0
-    x: 5
-    y: 3
-  - id: 25
+  - id: 105
     type: 0
     x: 5
     y: 4
-  - id: 26
+  - id: 106
     type: 0
-    x: 6
-    y: 6
-  - id: 27
+    x: 3
+    y: 4
+  - id: 107
     type: 0
-    x: 6
-    y: 7
-  - id: 28
+    x: 1
+    y: 4
+  - id: 108
     type: 0
-    x: 6
-    y: 8
-  - id: 29
+    x: 0
+    y: 4
+  - id: 109
     type: 0
-    x: 6
-    y: 9
-  - id: 30
+    x: 8
+    y: 4
+  - id: 110
     type: 0
-    x: 7
-    y: 6
-  - id: 31
-    type: 0
-    x: 7
+    x: 10
     y: 5
-  - id: 32
-    type: 0
-    x: 8
-    y: 5
-  - id: 33
-    type: 0
-    x: 8
-    y: 6
-  - id: 34
-    type: 0
-    x: 8
-    y: 7
-  - id: 35
-    type: 0
-    x: 8
-    y: 8
-  - id: 36
-    type: 0
-    x: 8
-    y: 9
-  - id: 37
-    type: 0
-    x: 7
-    y: 9
-  - id: 38
-    type: 0
-    x: 6
-    y: 10
-  - id: 39
-    type: 0
-    x: 5
-    y: 10
-  - id: 40
-    type: 0
-    x: 6
-    y: 11
-  - id: 41
-    type: 0
-    x: 5
-    y: 11
-  - id: 42
-    type: 0
-    x: 5
-    y: 9
-  - id: 43
-    type: 0
-    x: 7
-    y: 8
-  - id: 44
-    type: 0
-    x: 7
-    y: 7
-  - id: 45
-    type: 0
-    x: 4
-    y: 8
-  - id: 46
-    type: 0
-    x: 4
-    y: 9
-  - id: 47
-    type: 0
-    x: 4
-    y: 10
-  - id: 48
-    type: 8
-    x: 5
-    y: 11
-  - id: 49
+  - id: 111
     type: 0
     x: 2
     y: 4
-  - id: 50
+  - id: 112
+    type: 0
+    x: 4
+    y: 5
+  - id: 113
+    type: 0
+    x: 8
+    y: 6
+  - id: 114
+    type: 0
+    x: 6
+    y: 6
+  - id: 115
+    type: 0
+    x: 4
+    y: 6
+  - id: 116
     type: 0
     x: 2
+    y: 6
+  - id: 117
+    type: 0
+    x: 0
+    y: 5
+  - id: 118
+    type: 0
+    x: 3
+    y: 5
+  - id: 119
+    type: 0
+    x: 9
+    y: 6
+  - id: 120
+    type: 0
+    x: 10
+    y: 6
+  - id: 121
+    type: 0
+    x: 5
+    y: 6
+  - id: 122
+    type: 0
+    x: 1
+    y: 6
+  - id: 123
+    type: 0
+    x: 3
+    y: 6
+  - id: 124
+    type: 0
+    x: 0
+    y: 6
+  - id: 125
+    type: 0
+    x: 1
+    y: 5
+  - id: 126
+    type: 0
+    x: 2
+    y: 5
+  - id: 127
+    type: 0
+    x: 8
+    y: 5
+  - id: 128
+    type: 0
+    x: 9
+    y: 5
+  - id: 129
+    type: 0
+    x: 7
+    y: 4
+  - id: 130
+    type: 0
+    x: 6
+    y: 4
+  - id: 131
+    type: 0
+    x: 9
+    y: 4
+  - id: 132
+    type: 0
+    x: 10
+    y: 4
+  - id: 133
+    type: 0
+    x: 10
     y: 3
-  - id: 51
+  - id: 134
+    type: 0
+    x: 9
+    y: 3
+  - id: 135
+    type: 0
+    x: 9
+    y: 2
+  - id: 136
+    type: 0
+    x: 8
+    y: 2
+  - id: 137
+    type: 0
+    x: 7
+    y: 2
+  - id: 138
+    type: 0
+    x: 7
+    y: 3
+  - id: 139
+    type: 0
+    x: 8
+    y: 3
+  - id: 140
+    type: 0
+    x: 6
+    y: 3
+  - id: 141
+    type: 0
+    x: 4
+    y: 3
+  - id: 142
+    type: 0
+    x: 3
+    y: 3
+  - id: 143
     type: 0
     x: 2
     y: 2
-  - id: 52
+  - id: 144
     type: 0
     x: 1
     y: 2
-  - id: 53
+  - id: 145
+    type: 0
+    x: 3
+    y: 2
+  - id: 146
+    type: 0
+    x: 4
+    y: 2
+  - id: 147
+    type: 0
+    x: 5
+    y: 3
+  - id: 148
+    type: 0
+    x: 2
+    y: 3
+  - id: 149
+    type: 0
+    x: 0
+    y: 3
+  - id: 150
+    type: 0
+    x: 1
+    y: 3
+  - id: 151
+    type: 0
+    x: 4
+    y: 4
+  - id: 152
     type: 0
     x: 0
     y: 2
-  - id: 55
-    type: 3
-    x: 2
+  - id: 153
+    type: 0
+    x: 5
     y: 2
-  - id: 62
-    type: 9
+  - id: 154
+    type: 0
+    x: 6
+    y: 2
+  - id: 155
+    type: 0
+    x: 10
+    y: 1
+  - id: 156
+    type: 0
+    x: 10
+    y: 0
+  - id: 157
+    type: 0
+    x: 9
+    y: 0
+  - id: 158
+    type: 0
+    x: 10
+    y: 2
+  - id: 159
+    type: 0
+    x: 9
+    y: 1
+  - id: 160
+    type: 0
+    x: 8
+    y: 0
+  - id: 161
+    type: 0
+    x: 7
+    y: 0
+  - id: 162
+    type: 0
+    x: 6
+    y: 0
+  - id: 163
+    type: 0
+    x: 8
+    y: 1
+  - id: 164
+    type: 0
+    x: 7
+    y: 1
+  - id: 165
+    type: 0
+    x: 5
+    y: 0
+  - id: 166
+    type: 0
+    x: 6
+    y: 1
+  - id: 167
+    type: 0
+    x: 5
+    y: 1
+  - id: 168
+    type: 0
+    x: 4
+    y: 1
+  - id: 169
+    type: 0
+    x: 4
+    y: 0
+  - id: 170
+    type: 0
+    x: 3
+    y: 0
+  - id: 171
+    type: 0
+    x: 2
+    y: 0
+  - id: 172
+    type: 0
+    x: 3
+    y: 1
+  - id: 173
+    type: 0
+    x: 2
+    y: 1
+  - id: 174
+    type: 0
     x: 1
-    y: 7
-  - id: 63
-    type: 4
+    y: 0
+  - id: 175
+    type: 0
+    x: 0
+    y: 0
+  - id: 176
+    type: 0
+    x: 1
+    y: 1
+  - id: 177
+    type: 0
+    x: 0
+    y: 1
+  - id: 178
+    type: 1
+    x: 0
+    y: 6
+  - id: 179
+    type: 1
     x: 1
     y: 6
-  - id: 64
-    type: 5
+  - id: 180
+    type: 1
+    x: 2
+    y: 6
+  - id: 181
+    type: 1
+    x: 3
+    y: 6
+  - id: 182
+    type: 1
+    x: 4
+    y: 6
+  - id: 183
+    type: 1
+    x: 5
+    y: 6
+  - id: 184
+    type: 1
     x: 6
-    y: 10
-  nextObjectId: 65
+    y: 6
+  - id: 185
+    type: 1
+    x: 7
+    y: 6
+  - id: 186
+    type: 1
+    x: 8
+    y: 6
+  - id: 187
+    type: 1
+    x: 9
+    y: 6
+  - id: 188
+    type: 1
+    x: 10
+    y: 6
+  - id: 189
+    type: 1
+    x: 10
+    y: 5
+  - id: 190
+    type: 1
+    x: 10
+    y: 4
+  - id: 191
+    type: 1
+    x: 10
+    y: 3
+  - id: 192
+    type: 1
+    x: 10
+    y: 2
+  - id: 193
+    type: 1
+    x: 10
+    y: 1
+  - id: 194
+    type: 1
+    x: 10
+    y: 0
+  - id: 195
+    type: 1
+    x: 9
+    y: 0
+  - id: 196
+    type: 1
+    x: 4
+    y: 0
+  - id: 197
+    type: 1
+    x: 5
+    y: 0
+  - id: 198
+    type: 1
+    x: 6
+    y: 0
+  - id: 199
+    type: 1
+    x: 7
+    y: 0
+  - id: 200
+    type: 1
+    x: 8
+    y: 0
+  - id: 201
+    type: 1
+    x: 3
+    y: 0
+  - id: 202
+    type: 1
+    x: 2
+    y: 0
+  - id: 203
+    type: 1
+    x: 1
+    y: 0
+  - id: 204
+    type: 1
+    x: 0
+    y: 0
+  - id: 205
+    type: 1
+    x: 0
+    y: 1
+  - id: 206
+    type: 1
+    x: 0
+    y: 2
+  - id: 207
+    type: 1
+    x: 0
+    y: 3
+  - id: 208
+    type: 1
+    x: 0
+    y: 4
+  - id: 209
+    type: 1
+    x: 0
+    y: 5
+  - id: 210
+    type: 3
+    x: 1
+    y: 5
+  - id: 211
+    type: 1
+    x: 2
+    y: 5
+  - id: 212
+    type: 1
+    x: 6
+    y: 5
+  - id: 213
+    type: 1
+    x: 8
+    y: 4
+  - id: 214
+    type: 1
+    x: 8
+    y: 5
+  - id: 215
+    type: 1
+    x: 9
+    y: 5
+  - id: 216
+    type: 1
+    x: 9
+    y: 4
+  - id: 217
+    type: 1
+    x: 9
+    y: 3
+  - id: 219
+    type: 5
+    x: 3
+    y: 4
+  - id: 220
+    type: 5
+    x: 4
+    y: 4
+  - id: 221
+    type: 9
+    x: 2
+    y: 4
+  - id: 222
+    type: 9
+    x: 4
+    y: 4
+  - id: 223
+    type: 9
+    x: 5
+    y: 5
+  - id: 224
+    type: 9
+    x: 5
+    y: 3
+  - id: 225
+    type: 9
+    x: 6
+    y: 3
+  - id: 226
+    type: 9
+    x: 6
+    y: 2
+  - id: 227
+    type: 9
+    x: 7
+    y: 2
+  - id: 228
+    type: 9
+    x: 5
+    y: 1
+  - id: 229
+    type: 9
+    x: 4
+    y: 2
+  - id: 230
+    type: 9
+    x: 3
+    y: 1
+  - id: 231
+    type: 9
+    x: 2
+    y: 2
+  - id: 232
+    type: 9
+    x: 1
+    y: 3
+  - id: 233
+    type: 9
+    x: 3
+    y: 3
+  - id: 234
+    type: 6
+    x: 3
+    y: 5
+  - id: 235
+    type: 7
+    x: 6
+    y: 4
+  - id: 236
+    type: 1
+    x: 7
+    y: 1
+  - id: 237
+    type: 1
+    x: 8
+    y: 1
+  - id: 238
+    type: 1
+    x: 9
+    y: 1
+  - id: 239
+    type: 1
+    x: 9
+    y: 2
+  - id: 240
+    type: 1
+    x: 7
+    y: 5
+  - id: 241
+    type: 1
+    x: 1
+    y: 1
+  - id: 242
+    type: 8
+    x: 7
+    y: 3
+  nextObjectId: 243

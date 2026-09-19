@@ -96,20 +96,27 @@ public static class LevelEditorVerify
             Debug.LogError("Expected total solution count >= 2, got " + solve.SolutionCountAtMinimum);
             failures++;
         }
-        if (solve.StoredOptimalSolutionCount < 2)
+        if (solve.StoredSolutions.Count < 2)
         {
-            Debug.LogError("Expected at least 2 stored solutions, stored=" + solve.StoredOptimalSolutionCount);
+            Debug.LogError("Expected at least 2 stored distinct sequences, stored=" + solve.StoredSolutions.Count);
             failures++;
         }
-        if (solve.OptimalSolutions.Count >= 2 && PathsEqual(solve.OptimalSolutions[0], solve.OptimalSolutions[1]))
+        if (solve.StoredSolutions.Count >= 2 && PathsEqual(solve.StoredSolutions[0], solve.StoredSolutions[1]))
         {
             Debug.LogError("Stored solutions were identical.");
             failures++;
         }
-
-        for (int i = 0; i < solve.OptimalSolutions.Count; i++)
+        if (failures == 0 && solve.StoredSolutions.Count >= 2)
         {
-            if (!SimulateWinsWithinLimit(data, solve.OptimalSolutions[i], data.MoveLimit))
+            Debug.Log("MultiSol POC: PASS MinMoves=" + solve.MinimumMoves
+                + " Stored=" + solve.StoredSolutions.Count
+                + " → Show Solution 1/" + solve.StoredSolutions.Count
+                + " and 2/" + solve.StoredSolutions.Count);
+        }
+
+        for (int i = 0; i < solve.StoredSolutions.Count; i++)
+        {
+            if (!SimulateWinsWithinLimit(data, solve.StoredSolutions[i], data.MoveLimit))
             {
                 Debug.LogError("Solution " + i + " does not match solver rules.");
                 failures++;
@@ -340,6 +347,11 @@ public static class LevelEditorVerify
         if (LevelValidator.PlacementConflicts(LevelObjectType.Key, LevelObjectType.Enemy))
         {
             Debug.LogError("Key must be allowed to coexist with Enemy.");
+            failures++;
+        }
+        if (LevelValidator.PlacementConflicts(LevelObjectType.Rock, LevelObjectType.Spike))
+        {
+            Debug.LogError("Rock must be allowed to coexist with Spike.");
             failures++;
         }
         Object.DestroyImmediate(data);

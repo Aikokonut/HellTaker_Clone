@@ -8,23 +8,6 @@ public sealed class LevelDeadlockInfo
     public string Reason;
 }
 
-public sealed class LevelDifficultyTargets
-{
-    public int MinEnemy = 0;
-    public int MaxEnemy = 3;
-    public int MinRock = 0;
-    public int MaxRock = 4;
-    public int MinSpike = 0;
-    public int MaxSpike = 8;
-    public int MinPathExtra = 2;
-    public int MaxPathExtra = 64;
-    public int MinSolutions = 1;
-    public int MaxSolutions = 48;
-    public int MinMoveSlack = 0;
-    public int MaxMoveSlack = 4;
-    public int MinDependencyDepth = 1;
-}
-
 public sealed class LevelObjectCounts
 {
     public int Floor;
@@ -37,6 +20,7 @@ public sealed class LevelObjectCounts
     public int Key;
     public int Door;
     public int Goal;
+    public int RequiredZone;
 }
 
 public sealed class LevelAnalysisResult
@@ -60,76 +44,133 @@ public sealed class LevelAnalysisResult
     public readonly List<List<LevelDir>> OptimalSolutions = new List<List<LevelDir>>();
 }
 
+public sealed class LevelCalibrateResult
+{
+    public bool Success;
+    public string Message;
+    public int BaseCost = -1;
+    public int RefCost = -1;
+    public int CostSlack = -1;
+    public int BaseSolutions = -1;
+    public int RefSolutions = -1;
+    public int EnemyCount;
+    public int RockCount;
+    public int SpikeCount;
+    public int RecommendedAttempts = 80;
+    public int RecommendedMaxTargetSolutions = 1;
+}
+
 public static class LevelAnalyzer
 {
-    public static int MaxStoredSolutions = LevelSolver.DefaultMaxStoredSolutions;
-
-    public static bool MeetsDifficultyTargets(
-        LevelAnalysisResult analysis,
-        LevelDifficultyTargets targets,
-        LevelObjectCounts counts,
-        int baseShortest,
-        int dependencyDepth,
-        int solutionCount,
-        out string reason)
+    public static LevelCalibrateResult CalibrateFromReference(LevelData reference)
     {
-        reason = null;
-        if (targets == null)
+        LevelCalibrateResult result = new LevelCalibrateResult();
+        if (reference == null)
         {
-            reason = "Targets required.";
-            return false;
+            result.Message = "Reference level required.";
+            return result;
         }
-        if (analysis == null || !analysis.Solvable || analysis.MinimumMoves < 0)
+
+        LevelData full = reference.CreateRuntimeCopy();
+        full.MoveLimit = 0;
+        LevelData empty = reference.CreateRuntimeCopy();
+        empty.MoveLimit = 0;
+        StripPushables(empty);
+
+        LevelSolveResult baseSolve = LevelSolver.Solve(empty, 200000, false, LevelSolver.DefaultMaxStoredSolutions);
+        LevelSolveResult refSolve = LevelSolver.Solve(full, 200000, false, LevelSolver.DefaultMaxStoredSolutions);
+
+        if (!baseSolve.Success || baseSolve.MinimumMoves < 0)
         {
-            reason = "Not solvable within MoveLimit.";
-            return false;
+            Object.DestroyImmediate(full);
+            Object.DestroyImmediate(empty);
+            result.Message = "Empty map (no Enemy/Rock/Spike) not solvable.";
+            return result;
         }
-        if (counts == null)
+        if (!refSolve.Success || refSolve.MinimumMoves < 0)
         {
-            counts = analysis.Counts;
+            Object.DestroyImmediate(full);
+            Object.DestroyImmediate(empty);
+            result.Message = "Reference level not solvable.";
+            return result;
         }
-        if (counts.Enemy < targets.MinEnemy || counts.Enemy > targets.MaxEnemy)
+
+        result.BaseCost = baseSolve.MinimumMoves;
+        result.RefCost = refSolve.MinimumMoves;
+        result.CostSlack = result.RefCost - result.BaseCost;
+        if (result.CostSlack < 0) result.CostSlack = 0;
+        result.BaseSolutions = baseSolve.SolutionCountAtMinimum;
+        if (result.BaseSolutions < 0)
         {
-            reason = "Enemy count out of range.";
-            return false;
+            result.BaseSolutions = baseSolve.StoredOptimalSolutionCount;
         }
-        if (counts.Rock < targets.MinRock || counts.Rock > targets.MaxRock)
+        result.RefSolutions = refSolve.SolutionCountAtMinimum;
+        if (result.RefSolutions < 0)
         {
-            reason = "Rock count out of range.";
-            return false;
+            result.RefSolutions = refSolve.StoredOptimalSolutionCount;
         }
-        if (counts.Spike < targets.MinSpike || counts.Spike > targets.MaxSpike)
+
+        List<LevelObjectData> objs = reference.Objects;
+        for (int i = 0; i < objs.Count; i++)
         {
-            reason = "Spike count out of range.";
-            return false;
+            if (objs[i].Type == LevelObjectType.Enemy) result.EnemyCount++;
+            else if (objs[i].Type == LevelObjectType.Rock) result.RockCount++;
+            else if (objs[i].Type == LevelObjectType.Spike) result.SpikeCount++;
         }
-        int pathExtra = baseShortest >= 0 ? analysis.MinimumMoves - baseShortest : 0;
-        if (pathExtra < targets.MinPathExtra || pathExtra > targets.MaxPathExtra)
+
+        result.RecommendedMaxTargetSolutions = result.RefSolutions;
+        if (result.RecommendedMaxTargetSolutions < 1)
         {
-            reason = "PathExtra out of range.";
-            return false;
+            result.RecommendedMaxTargetSolutions = 1;
         }
-        if (analysis.MoveSlack == int.MinValue
-            || analysis.MoveSlack < targets.MinMoveSlack
-            || analysis.MoveSlack > targets.MaxMoveSlack)
+        if (result.RecommendedMaxTargetSolutions > 8)
         {
-            reason = "MoveSlack out of range.";
-            return false;
+            result.RecommendedMaxTargetSolutions = 8;
         }
-        if (solutionCount < targets.MinSolutions || solutionCount > targets.MaxSolutions)
-        {
-            reason = "Solution count out of range.";
-            return false;
-        }
-        if (dependencyDepth < targets.MinDependencyDepth)
-        {
-            reason = "Dependency depth below minimum.";
-            return false;
-        }
-        return true;
+
+        int objects = result.EnemyCount + result.RockCount + result.SpikeCount;
+        result.RecommendedAttempts = 40 + objects * 25 + result.CostSlack * 5;
+        if (result.RecommendedAttempts < 60) result.RecommendedAttempts = 60;
+        if (result.RecommendedAttempts > 300) result.RecommendedAttempts = 300;
+
+        result.Success = true;
+        result.Message = "BaseCost=" + result.BaseCost
+            + " RefCost=" + result.RefCost
+            + " → CostSlack=" + result.CostSlack
+            + " | E/R/S=" + result.EnemyCount + "/" + result.RockCount + "/" + result.SpikeCount
+            + " | Sols empty=" + result.BaseSolutions + " ref=" + result.RefSolutions
+            + " → MaxTargetSolutions=" + result.RecommendedMaxTargetSolutions
+            + " Attempts≈" + result.RecommendedAttempts;
+
+        Object.DestroyImmediate(full);
+        Object.DestroyImmediate(empty);
+        return result;
     }
 
+    private static void StripPushables(LevelData level)
+    {
+        List<LevelObjectData> objects = level.Objects;
+        for (int i = objects.Count - 1; i >= 0; i--)
+        {
+            LevelObjectType t = objects[i].Type;
+            if (t == LevelObjectType.Enemy || t == LevelObjectType.Rock || t == LevelObjectType.Spike)
+            {
+                objects.RemoveAt(i);
+            }
+        }
+        level.SyncDerivedFields();
+    }
+
+    public static int MaxStoredSolutions = LevelSolver.DefaultMaxStoredSolutions;
+
+    public static int ImpactProbeMaxStates = 12000;
+
     public static bool HasGameplayImpact(LevelData data, LevelObjectData obj)
+    {
+        return HasGameplayImpact(data, obj, ImpactProbeMaxStates);
+    }
+
+    public static bool HasGameplayImpact(LevelData data, LevelObjectData obj, int maxStates)
     {
         if (data == null || obj == null)
         {
@@ -149,27 +190,32 @@ public static class LevelAnalyzer
         LevelLogic logic = new LevelLogic(data);
         LevelSimState state = logic.CreateInitialState(data);
         int index = logic.ToIndex(obj.X, obj.Y);
-
-        if (obj.Type == LevelObjectType.Spike)
-        {
-            return SpikeHasImpact(logic, index);
-        }
-        if (obj.Type == LevelObjectType.Enemy)
-        {
-            if (IsEnemyInUselessCorner(logic, ref state, index))
-            {
-                return false;
-            }
-            return PushableHasImpact(logic, ref state, index, true);
-        }
-        if (IsRockInUselessCorner(logic, ref state, index))
+        if (index == logic.StartIndex || index == logic.GoalIndex)
         {
             return false;
         }
-        return PushableHasImpact(logic, ref state, index, false);
+        if (!IsOnOrNearCriticalRoute(logic, index))
+        {
+            return false;
+        }
+        if (obj.Type == LevelObjectType.Enemy && IsEnemyInUselessCorner(logic, ref state, index))
+        {
+            return false;
+        }
+        if (obj.Type == LevelObjectType.Rock && IsRockInUselessCorner(logic, ref state, index))
+        {
+            return false;
+        }
+        return CounterfactualChangesSolutions(data, obj, maxStates);
     }
 
     public static bool AllPuzzleObjectsHaveImpact(LevelData data, bool[] protectedCell, out string reason)
+    {
+        return AllPuzzleObjectsHaveImpact(data, protectedCell, ImpactProbeMaxStates, out reason);
+    }
+
+    public static bool AllPuzzleObjectsHaveImpact(
+        LevelData data, bool[] protectedCell, int maxStates, out string reason)
     {
         reason = null;
         if (data == null)
@@ -192,69 +238,125 @@ public static class LevelAnalyzer
             {
                 continue;
             }
-            if (!HasGameplayImpact(data, obj))
+            if (!HasGameplayImpact(data, obj, maxStates))
             {
-                reason = obj.Type + " at " + obj.X + "," + obj.Y + " has no gameplay impact.";
+                reason = obj.Type + " at " + obj.X + "," + obj.Y
+                    + " is USELESS (no counterfactual solution impact).";
                 return false;
             }
         }
         return true;
     }
 
-    private static bool InGrid(LevelData data, int x, int y)
+    private static bool CounterfactualChangesSolutions(LevelData data, LevelObjectData obj, int maxStates)
     {
-        return x >= 0 && y >= 0 && x < data.Width && y < data.Height;
-    }
+        if (maxStates < 2000)
+        {
+            maxStates = 2000;
+        }
 
-    private static bool SpikeHasImpact(LevelLogic logic, int index)
-    {
-        if (index < 0 || !logic.IsFloor(index) || logic.IsSolid(index) || !logic.IsSpike(index))
+        LevelSolveResult withObj = LevelSolver.Solve(data, maxStates, false, 8);
+
+        int removeAt = -1;
+        List<LevelObjectData> objects = data.Objects;
+        for (int i = 0; i < objects.Count; i++)
+        {
+            if (objects[i].Id == obj.Id)
+            {
+                removeAt = i;
+                break;
+            }
+        }
+        if (removeAt < 0)
         {
             return false;
         }
-        if (index == logic.StartIndex)
+
+        int depWith = CountPathInteractions(data, withObj.OptimalPath);
+        int taxWith = MoveTax(withObj);
+
+        LevelObjectData held = objects[removeAt];
+        objects.RemoveAt(removeAt);
+        data.SyncDerivedFields();
+
+        LevelSolveResult without = LevelSolver.Solve(data, maxStates, false, 8);
+        int depWithout = CountPathInteractions(data, without.OptimalPath);
+        int taxWithout = MoveTax(without);
+
+        objects.Insert(removeAt, held);
+        data.SyncDerivedFields();
+
+        if (!withObj.Success)
         {
-            return false;
+            return without.Success;
         }
-        int cellCount = logic.CellCount;
-        bool[] walk = new bool[cellCount];
-        for (int i = 0; i < cellCount; i++)
-        {
-            walk[i] = logic.IsFloor(i) && !logic.IsSolid(i);
-        }
-        int[] distStart = new int[cellCount];
-        int[] distGoal = new int[cellCount];
-        FillBfs(logic, walk, logic.StartIndex, distStart);
-        FillBfs(logic, walk, logic.GoalIndex, distGoal);
-        if (logic.GoalIndex < 0 || distStart[logic.GoalIndex] < 0)
-        {
-            return false;
-        }
-        int shortest = distStart[logic.GoalIndex];
-        if (distStart[index] < 0 || distGoal[index] < 0)
-        {
-            return false;
-        }
-        if (distStart[index] + distGoal[index] <= shortest)
+        if (!without.Success)
         {
             return true;
         }
-        int x;
-        int y;
-        logic.FromIndex(index, out x, out y);
-        return CellOnTerrainShortest(logic, SafeIndex(logic, x + 1, y))
-            || CellOnTerrainShortest(logic, SafeIndex(logic, x - 1, y))
-            || CellOnTerrainShortest(logic, SafeIndex(logic, x, y + 1))
-            || CellOnTerrainShortest(logic, SafeIndex(logic, x, y - 1));
+        if (withObj.MinimumMoves != without.MinimumMoves)
+        {
+            return true;
+        }
+        if (withObj.SolutionCountAtMinimum >= 0
+            && without.SolutionCountAtMinimum >= 0
+            && withObj.SolutionCountAtMinimum != without.SolutionCountAtMinimum)
+        {
+            return true;
+        }
+        if (taxWith != taxWithout)
+        {
+            return true;
+        }
+        if (depWith != depWithout)
+        {
+            return true;
+        }
+        return false;
     }
 
-    private static bool PushableHasImpact(LevelLogic logic, ref LevelSimState state, int index, bool enemy)
+    private static int MoveTax(LevelSolveResult solve)
     {
-        int x;
-        int y;
-        logic.FromIndex(index, out x, out y);
-        bool blocksPath = CellOnTerrainShortest(logic, index);
-        if (blocksPath)
+        if (solve == null || solve.MinimumMoves < 0 || solve.OptimalPath == null)
+        {
+            return -1;
+        }
+        return solve.MinimumMoves - solve.OptimalPath.Count;
+    }
+
+    private static int CountPathInteractions(LevelData data, List<LevelDir> path)
+    {
+        if (data == null || path == null || path.Count == 0)
+        {
+            return 0;
+        }
+        LevelLogic logic = new LevelLogic(data);
+        LevelSimState state = logic.CreateInitialState(data);
+        int depth = 0;
+        for (int i = 0; i < path.Count; i++)
+        {
+            LevelActionResult a = logic.TryMove(ref state, path[i], false);
+            if (a == LevelActionResult.Pushed || a == LevelActionResult.Kicked
+                || a == LevelActionResult.OpenedDoor || a == LevelActionResult.CollectedKey
+                || a == LevelActionResult.SpikePenalty)
+            {
+                depth++;
+            }
+            if (state.Dead && !state.Won)
+            {
+                break;
+            }
+        }
+        return depth;
+    }
+
+    private static bool IsOnOrNearCriticalRoute(LevelLogic logic, int index)
+    {
+        if (CellOnTerrainShortest(logic, index))
+        {
+            return true;
+        }
+        if (IsTerrainChoke(logic, index))
         {
             return true;
         }
@@ -262,22 +364,42 @@ public static class LevelAnalyzer
         {
             return true;
         }
-        bool canPush = false;
-        if (enemy)
+        // Allow forced-detour cells (e.g. Key branch) that are start-reachable.
+        int cellCount = logic.CellCount;
+        bool[] walk = new bool[cellCount];
+        for (int i = 0; i < cellCount; i++)
         {
-            canPush = !IsPushBlocked(logic, ref state, x + 1, y)
-                || !IsPushBlocked(logic, ref state, x - 1, y)
-                || !IsPushBlocked(logic, ref state, x, y + 1)
-                || !IsPushBlocked(logic, ref state, x, y - 1);
+            walk[i] = logic.IsFloor(i) && !logic.IsSolid(i);
         }
-        else
+        int[] distStart = new int[cellCount];
+        FillBfs(logic, walk, logic.StartIndex, distStart);
+        return index >= 0 && distStart[index] >= 0;
+    }
+
+    private static bool IsTerrainChoke(LevelLogic logic, int index)
+    {
+        if (index < 0 || index == logic.StartIndex || index == logic.GoalIndex)
         {
-            canPush = !IsRockPushBlocked(logic, ref state, x + 1, y)
-                || !IsRockPushBlocked(logic, ref state, x - 1, y)
-                || !IsRockPushBlocked(logic, ref state, x, y + 1)
-                || !IsRockPushBlocked(logic, ref state, x, y - 1);
+            return false;
         }
-        return canPush;
+        if (!logic.IsFloor(index) || logic.IsSolid(index))
+        {
+            return false;
+        }
+        int cellCount = logic.CellCount;
+        bool[] walk = new bool[cellCount];
+        for (int i = 0; i < cellCount; i++)
+        {
+            walk[i] = logic.IsFloor(i) && !logic.IsSolid(i) && i != index;
+        }
+        int[] dist = new int[cellCount];
+        FillBfs(logic, walk, logic.StartIndex, dist);
+        return logic.GoalIndex >= 0 && dist[logic.GoalIndex] < 0;
+    }
+
+    private static bool InGrid(LevelData data, int x, int y)
+    {
+        return x >= 0 && y >= 0 && x < data.Width && y < data.Height;
     }
 
     private static bool CellOnTerrainShortest(LevelLogic logic, int index)
@@ -405,7 +527,7 @@ public static class LevelAnalyzer
             return analysis;
         }
 
-        LevelSolveResult solve = LevelSolver.Solve(data, 500000, true, maxStoredSolutions);
+        LevelSolveResult solve = LevelSolver.Solve(data, 2000000, true, maxStoredSolutions);
         CopySolutions(solve, analysis);
 
         if (solve.TimedOut || solve.StateLimitReached)
@@ -486,6 +608,7 @@ public static class LevelAnalyzer
                 case LevelObjectType.Key: counts.Key++; break;
                 case LevelObjectType.Door: counts.Door++; break;
                 case LevelObjectType.Goal: counts.Goal++; break;
+                case LevelObjectType.RequiredZone: counts.RequiredZone++; break;
             }
         }
     }

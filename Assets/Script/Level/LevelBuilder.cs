@@ -117,6 +117,7 @@ public static class LevelBuilder
             case LevelObjectType.Key: return new Color(0.95f, 0.85f, 0.2f, 1f);
             case LevelObjectType.Door: return new Color(0.45f, 0.3f, 0.15f, 1f);
             case LevelObjectType.Goal: return new Color(0.3f, 0.55f, 0.95f, 1f);
+            case LevelObjectType.RequiredZone: return new Color(0.55f, 0.25f, 0.75f, 0.55f);
             default: return Color.magenta;
         }
     }

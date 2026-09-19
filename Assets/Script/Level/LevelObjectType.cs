@@ -9,5 +9,6 @@ public enum LevelObjectType
     Key = 6,
     Door = 7,
     Goal = 8,
-    Rock = 9
+    Rock = 9,
+    RequiredZone = 10
 }

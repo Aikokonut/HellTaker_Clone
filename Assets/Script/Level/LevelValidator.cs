@@ -300,7 +300,25 @@ public static class LevelValidator
         {
             return false;
         }
+        if (AllowsSpikeRockCoexistence(a, b))
+        {
+            return false;
+        }
+        if (a == LevelObjectType.RequiredZone && AllowsZoneCoexistence(b))
+        {
+            return false;
+        }
+        if (b == LevelObjectType.RequiredZone && AllowsZoneCoexistence(a))
+        {
+            return false;
+        }
         return true;
+    }
+
+    private static bool AllowsSpikeRockCoexistence(LevelObjectType a, LevelObjectType b)
+    {
+        return (a == LevelObjectType.Spike && b == LevelObjectType.Rock)
+            || (a == LevelObjectType.Rock && b == LevelObjectType.Spike);
     }
 
     private static bool AllowsKeyCoexistence(LevelObjectType type)
@@ -308,6 +326,16 @@ public static class LevelValidator
         return type == LevelObjectType.Enemy
             || type == LevelObjectType.Rock
             || type == LevelObjectType.Spike;
+    }
+
+    private static bool AllowsZoneCoexistence(LevelObjectType type)
+    {
+        return type == LevelObjectType.Spike
+            || type == LevelObjectType.Key
+            || type == LevelObjectType.PlayerStart
+            || type == LevelObjectType.Goal
+            || type == LevelObjectType.Enemy
+            || type == LevelObjectType.Rock;
     }
 
     private static void AddError(LevelValidationResult result, string message, Vector2Int cell)

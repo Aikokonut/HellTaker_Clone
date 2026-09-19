@@ -14,14 +14,25 @@ public sealed class LevelSolveResult
     public readonly List<LevelDir> OptimalPath = new List<LevelDir>();
     public readonly List<List<LevelDir>> OptimalSolutions = new List<List<LevelDir>>();
     public string Message;
+
+    public List<List<LevelDir>> StoredSolutions
+    {
+        get { return OptimalSolutions; }
+    }
 }
 
 public static class LevelSolver
 {
-    private const int DefaultMaxStates = 500000;
+    private const int DefaultMaxStates = 2000000;
     private const int DefaultMaxDepthPad = 64;
     public const int DefaultMaxStoredSolutions = 32;
-    private const int MaxPathCountEnumerate = 1000000;
+
+    private struct SearchNode
+    {
+        public LevelSimState State;
+        public int Parent;
+        public LevelDir Dir;
+    }
 
     public static LevelSolveResult Solve(LevelData data)
     {
@@ -78,67 +89,134 @@ public static class LevelSolver
             moveLimit = data.Width * data.Height + DefaultMaxDepthPad;
         }
 
-        List<LevelDir> path = new List<LevelDir>(32);
-        HashSet<long> visitedOnPath = new HashSet<long>();
-        long startKey = logic.PackStateKey(ref initial);
-        visitedOnPath.Add(startKey);
-
-        int totalSolutions = 0;
         int minMoves = -1;
         int expansions = 0;
-        bool countCapped = false;
-        LevelDir[] dirs = { LevelDir.Up, LevelDir.Right, LevelDir.Down, LevelDir.Left };
-
-        Search(
+        List<LevelDir> firstPath = new List<LevelDir>(32);
+        bool found = FindMinMovesBfs(
             logic,
             initial,
-            path,
-            visitedOnPath,
-            dirs,
             moveLimit,
             maxStates,
-            maxStoredSolutions,
             result,
             ref expansions,
-            ref totalSolutions,
             ref minMoves,
-            ref countCapped);
+            firstPath);
+
+        if (!found || minMoves < 0)
+        {
+            result.MinimumMoves = -1;
+            result.StoredOptimalSolutionCount = 0;
+            result.SolutionCountAtMinimum = 0;
+            result.Success = false;
+            if (string.IsNullOrEmpty(result.Message))
+            {
+                result.Message = result.StateLimitReached
+                    ? "No solution found before state limit."
+                    : "No solution within MoveLimit.";
+            }
+            result.TimedOut = result.StateLimitReached;
+            return result;
+        }
 
         result.MinimumMoves = minMoves;
-        result.StoredOptimalSolutionCount = result.OptimalSolutions.Count;
-        if (countCapped || result.StateLimitReached)
+        result.OptimalSolutions.Clear();
+        result.OptimalPath.Clear();
+
+        bool savedLimit = result.StateLimitReached;
+        result.StateLimitReached = false;
+        int enumExpansions = 0;
+        LevelDir[] dirs = { LevelDir.Up, LevelDir.Right, LevelDir.Down, LevelDir.Left };
+        long startKey = logic.PackStateKey(ref initial);
+
+        int bypassSlots = maxStoredSolutions;
+        int doorSlots = 0;
+        if (logic.DoorCount > 0 && maxStoredSolutions >= 2)
         {
-            result.OptimalSolutionsCapped = true;
-            result.SolutionCountAtMinimum = countCapped ? -1 : totalSolutions;
-            if (result.StateLimitReached)
+            doorSlots = maxStoredSolutions / 2;
+            if (doorSlots < 1)
             {
-                result.TimedOut = totalSolutions <= 0;
-                result.Message = totalSolutions > 0
-                    ? "Partial: state expansion limit reached."
-                    : "No solution found before state limit.";
+                doorSlots = 1;
             }
-            else
+            bypassSlots = maxStoredSolutions - doorSlots;
+            if (bypassSlots < 1)
             {
-                result.Message = "Solution count capped.";
+                bypassSlots = 1;
+                doorSlots = maxStoredSolutions - 1;
             }
-        }
-        else
-        {
-            result.SolutionCountAtMinimum = totalSolutions;
-            result.Message = totalSolutions > 0 ? "Solved." : "No solution within MoveLimit.";
         }
 
+        List<List<LevelDir>> bypassPaths = new List<List<LevelDir>>(bypassSlots);
+        List<List<LevelDir>> doorPaths = new List<List<LevelDir>>(doorSlots > 0 ? doorSlots : 1);
+        FillWinsByDoorClass(
+            logic, initial, startKey, dirs, minMoves, moveLimit, maxStates,
+            bypassSlots, false, bypassPaths, ref enumExpansions, result);
+        if (doorSlots > 0)
+        {
+            FillWinsByDoorClass(
+                logic, initial, startKey, dirs, minMoves, moveLimit, maxStates,
+                doorSlots, true, doorPaths, ref enumExpansions, result);
+        }
+
+        if (bypassPaths.Count == 0 && firstPath.Count > 0)
+        {
+            bypassPaths.Add(CopyNewPath(firstPath));
+        }
+
+        int storedAtMin = 0;
+        for (int i = 0; i < bypassPaths.Count; i++)
+        {
+            result.OptimalSolutions.Add(bypassPaths[i]);
+            if (PathMoveCost(logic, initial, bypassPaths[i]) == minMoves)
+            {
+                storedAtMin++;
+            }
+        }
+        for (int i = 0; i < doorPaths.Count; i++)
+        {
+            if (!ContainsSequence(result.OptimalSolutions, doorPaths[i]))
+            {
+                result.OptimalSolutions.Add(doorPaths[i]);
+            }
+        }
+
+        result.SolutionCountAtMinimum = storedAtMin > 0 ? storedAtMin : (bypassPaths.Count > 0 ? 1 : 0);
+        result.NearPlus1Count = 0;
+        result.NearPlus2Count = 0;
+
+        if (result.OptimalSolutions.Count >= maxStoredSolutions)
+        {
+            result.OptimalSolutionsCapped = true;
+        }
+
+        if (result.StateLimitReached && result.OptimalSolutions.Count > 0)
+        {
+            result.OptimalSolutionsCapped = true;
+            result.StateLimitReached = savedLimit;
+        }
+        else if (!result.StateLimitReached)
+        {
+            result.StateLimitReached = savedLimit;
+        }
+
+        result.StoredOptimalSolutionCount = result.OptimalSolutions.Count;
         if (result.OptimalSolutions.Count > 0)
         {
             CopyPath(result.OptimalSolutions[0], result.OptimalPath);
         }
 
-        result.Success = totalSolutions > 0;
-        if (!result.Success && string.IsNullOrEmpty(result.Message))
+        result.Success = result.OptimalSolutions.Count > 0;
+        if (!result.Success)
         {
-            result.Message = "No solution within MoveLimit.";
+            result.Message = result.StateLimitReached
+                ? "No solution found before state limit."
+                : "No solution within MoveLimit.";
+            result.TimedOut = result.StateLimitReached;
         }
-        else if (result.Success && !result.StateLimitReached && !countCapped)
+        else if (result.OptimalSolutionsCapped)
+        {
+            result.Message = "Solved (stored bypass + door paths, capped).";
+        }
+        else
         {
             result.Message = "Solved.";
         }
@@ -146,53 +224,271 @@ public static class LevelSolver
         return result;
     }
 
-    private static void Search(
+    private static void FillWinsByDoorClass(
+        LevelLogic logic,
+        LevelSimState initial,
+        long startKey,
+        LevelDir[] dirs,
+        int minMoves,
+        int moveLimit,
+        int maxStates,
+        int maxStore,
+        bool requireOpenedDoor,
+        List<List<LevelDir>> outPaths,
+        ref int enumExpansions,
+        LevelSolveResult limitResult)
+    {
+        if (maxStore < 1)
+        {
+            return;
+        }
+        for (int cost = minMoves; cost <= moveLimit; cost++)
+        {
+            if (outPaths.Count >= maxStore)
+            {
+                return;
+            }
+            LevelSolveResult tmp = new LevelSolveResult();
+            bool stop = false;
+            List<LevelDir> path = new List<LevelDir>(cost + 4);
+            HashSet<long> visitedOnPath = new HashSet<long>();
+            visitedOnPath.Add(startKey);
+            int doorMode = requireOpenedDoor ? 1 : 0;
+            EnumerateDistinctSequences(
+                logic,
+                initial,
+                path,
+                visitedOnPath,
+                dirs,
+                cost,
+                maxStates,
+                maxStore - outPaths.Count,
+                tmp,
+                ref enumExpansions,
+                ref stop,
+                doorMode,
+                initial.ClosedDoorMask);
+            if (tmp.StateLimitReached)
+            {
+                limitResult.StateLimitReached = true;
+                return;
+            }
+            for (int i = 0; i < tmp.OptimalSolutions.Count; i++)
+            {
+                if (outPaths.Count >= maxStore)
+                {
+                    return;
+                }
+                if (!ContainsSequence(outPaths, tmp.OptimalSolutions[i]))
+                {
+                    outPaths.Add(CopyNewPath(tmp.OptimalSolutions[i]));
+                }
+            }
+        }
+    }
+
+    private static int PathMoveCost(LevelLogic logic, LevelSimState initial, List<LevelDir> path)
+    {
+        LevelSimState st = initial;
+        for (int i = 0; i < path.Count; i++)
+        {
+            logic.TryMove(ref st, path[i], false);
+            if (st.Won || (st.Dead && !st.Won))
+            {
+                break;
+            }
+        }
+        return st.MovesUsed;
+    }
+
+    private static bool FindMinMovesBfs(
+        LevelLogic logic,
+        LevelSimState initial,
+        int moveLimit,
+        int maxStates,
+        LevelSolveResult result,
+        ref int expansions,
+        ref int minMoves,
+        List<LevelDir> outPath)
+    {
+        outPath.Clear();
+        if (initial.Won)
+        {
+            minMoves = initial.MovesUsed;
+            return true;
+        }
+
+        List<SearchNode> nodes = new List<SearchNode>(4096);
+        Dictionary<long, int> bestMoves = new Dictionary<long, int>(4096);
+        Queue<int>[] buckets = new Queue<int>[moveLimit + 1];
+        for (int i = 0; i <= moveLimit; i++)
+        {
+            buckets[i] = new Queue<int>();
+        }
+
+        SearchNode root = new SearchNode();
+        root.State = initial;
+        root.Parent = -1;
+        root.Dir = LevelDir.None;
+        nodes.Add(root);
+        long startKey = logic.PackStateKey(ref initial);
+        bestMoves[startKey] = initial.MovesUsed;
+        buckets[initial.MovesUsed].Enqueue(0);
+
+        LevelDir[] dirs = { LevelDir.Up, LevelDir.Right, LevelDir.Down, LevelDir.Left };
+        int cursor = 0;
+        int winNode = -1;
+
+        while (cursor <= moveLimit)
+        {
+            Queue<int> bucket = buckets[cursor];
+            if (bucket.Count == 0)
+            {
+                cursor++;
+                continue;
+            }
+
+            int index = bucket.Dequeue();
+            SearchNode node = nodes[index];
+            LevelSimState state = node.State;
+            if (state.MovesUsed != cursor)
+            {
+                continue;
+            }
+
+            expansions++;
+            if (expansions >= maxStates)
+            {
+                result.StateLimitReached = true;
+                break;
+            }
+
+            if (state.Won)
+            {
+                minMoves = state.MovesUsed;
+                winNode = index;
+                break;
+            }
+
+            if (state.Dead || state.MovesUsed >= moveLimit)
+            {
+                continue;
+            }
+
+            for (int d = 0; d < 4; d++)
+            {
+                LevelSimState next = state;
+                logic.TryMove(ref next, dirs[d], true);
+                if (next.Dead && !next.Won)
+                {
+                    continue;
+                }
+                if (logic.StatesEqual(ref next, ref state) && !next.Won)
+                {
+                    continue;
+                }
+                if (next.MovesUsed > moveLimit)
+                {
+                    continue;
+                }
+
+                long key = logic.PackStateKey(ref next);
+                int known;
+                if (bestMoves.TryGetValue(key, out known))
+                {
+                    if (next.MovesUsed >= known)
+                    {
+                        continue;
+                    }
+                }
+
+                bestMoves[key] = next.MovesUsed;
+                SearchNode child = new SearchNode();
+                child.State = next;
+                child.Parent = index;
+                child.Dir = dirs[d];
+                int childIndex = nodes.Count;
+                nodes.Add(child);
+                buckets[next.MovesUsed].Enqueue(childIndex);
+            }
+        }
+
+        if (winNode < 0)
+        {
+            return false;
+        }
+
+        List<LevelDir> rev = new List<LevelDir>(32);
+        int walk = winNode;
+        while (walk > 0)
+        {
+            SearchNode n = nodes[walk];
+            if (n.Dir != LevelDir.None)
+            {
+                rev.Add(n.Dir);
+            }
+            walk = n.Parent;
+        }
+        for (int i = rev.Count - 1; i >= 0; i--)
+        {
+            outPath.Add(rev[i]);
+        }
+        return true;
+    }
+
+    private static void EnumerateDistinctSequences(
         LevelLogic logic,
         LevelSimState state,
         List<LevelDir> path,
         HashSet<long> visitedOnPath,
         LevelDir[] dirs,
-        int moveLimit,
+        int targetMoves,
         int maxStates,
         int maxStoredSolutions,
         LevelSolveResult result,
         ref int expansions,
-        ref int totalSolutions,
-        ref int minMoves,
-        ref bool countCapped)
+        ref bool stop,
+        int doorMode,
+        ulong startClosedDoorMask)
     {
-        if (result.StateLimitReached || countCapped)
+        if (stop)
         {
             return;
         }
         if (expansions >= maxStates)
         {
             result.StateLimitReached = true;
+            stop = true;
             return;
         }
         expansions++;
 
         if (state.Won)
         {
-            if (state.MovesUsed <= moveLimit)
+            if (state.MovesUsed == targetMoves)
             {
-                RecordSolution(path, state.MovesUsed, maxStoredSolutions, result, ref totalSolutions, ref minMoves, ref countCapped);
+                bool opened = state.ClosedDoorMask != startClosedDoorMask;
+                if (doorMode == 1 && !opened)
+                {
+                    return;
+                }
+                if (doorMode == 0 && opened)
+                {
+                    return;
+                }
+                TryStoreDistinctSequence(path, maxStoredSolutions, result, ref stop);
             }
             return;
         }
 
-        if (state.Dead)
-        {
-            return;
-        }
-        if (state.MovesUsed >= moveLimit)
+        if (state.Dead || state.MovesUsed >= targetMoves)
         {
             return;
         }
 
         for (int d = 0; d < 4; d++)
         {
-            if (result.StateLimitReached || countCapped)
+            if (stop)
             {
                 return;
             }
@@ -207,6 +503,10 @@ public static class LevelSolver
             {
                 continue;
             }
+            if (nextState.MovesUsed > targetMoves)
+            {
+                continue;
+            }
 
             long key = logic.PackStateKey(ref nextState);
             if (visitedOnPath.Contains(key))
@@ -216,59 +516,84 @@ public static class LevelSolver
 
             path.Add(dirs[d]);
             visitedOnPath.Add(key);
-            Search(
+            EnumerateDistinctSequences(
                 logic,
                 nextState,
                 path,
                 visitedOnPath,
                 dirs,
-                moveLimit,
+                targetMoves,
                 maxStates,
                 maxStoredSolutions,
                 result,
                 ref expansions,
-                ref totalSolutions,
-                ref minMoves,
-                ref countCapped);
+                ref stop,
+                doorMode,
+                startClosedDoorMask);
             visitedOnPath.Remove(key);
             path.RemoveAt(path.Count - 1);
         }
     }
 
-    private static void RecordSolution(
+    private static void TryStoreDistinctSequence(
         List<LevelDir> path,
-        int movesUsed,
         int maxStoredSolutions,
         LevelSolveResult result,
-        ref int totalSolutions,
-        ref int minMoves,
-        ref bool countCapped)
+        ref bool stop)
     {
-        totalSolutions++;
-        if (minMoves < 0 || movesUsed < minMoves)
+        if (ContainsSequence(result.OptimalSolutions, path))
         {
-            minMoves = movesUsed;
+            return;
         }
-
-        if (result.OptimalSolutions.Count < maxStoredSolutions)
+        if (result.OptimalSolutions.Count >= maxStoredSolutions)
         {
-            List<LevelDir> copy = new List<LevelDir>(path.Count);
-            for (int i = 0; i < path.Count; i++)
+            result.OptimalSolutionsCapped = true;
+            stop = true;
+            return;
+        }
+        result.OptimalSolutions.Add(CopyNewPath(path));
+        if (result.OptimalSolutions.Count >= maxStoredSolutions)
+        {
+            stop = true;
+        }
+    }
+
+    private static bool ContainsSequence(List<List<LevelDir>> stored, List<LevelDir> path)
+    {
+        for (int i = 0; i < stored.Count; i++)
+        {
+            if (SequencesEqual(stored[i], path))
             {
-                copy.Add(path[i]);
+                return true;
             }
-            result.OptimalSolutions.Add(copy);
         }
-        else
-        {
-            result.OptimalSolutionsCapped = true;
-        }
+        return false;
+    }
 
-        if (totalSolutions >= MaxPathCountEnumerate)
+    private static bool SequencesEqual(List<LevelDir> a, List<LevelDir> b)
+    {
+        if (a.Count != b.Count)
         {
-            countCapped = true;
-            result.OptimalSolutionsCapped = true;
+            return false;
         }
+        for (int i = 0; i < a.Count; i++)
+        {
+            if (a[i] != b[i])
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<LevelDir> CopyNewPath(List<LevelDir> source)
+    {
+        List<LevelDir> copy = new List<LevelDir>(source.Count);
+        for (int i = 0; i < source.Count; i++)
+        {
+            copy.Add(source[i]);
+        }
+        return copy;
     }
 
     private static void CopyPath(List<LevelDir> source, List<LevelDir> dest)

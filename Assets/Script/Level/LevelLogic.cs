@@ -37,6 +37,7 @@ public struct LevelSimState
     public int KeysCollected;
     public ulong ClosedDoorMask;
     public ulong KeyPresentMask;
+    public ulong ZoneVisitedMask;
     public int MovesUsed;
     public bool Dead;
     public bool Won;
@@ -47,6 +48,7 @@ public sealed class LevelLogic
     public const int MaxCells = 256;
     public const int MaxDoors = 64;
     public const int MaxKeys = 64;
+    public const int MaxZones = 64;
 
     private readonly int width;
     private readonly int height;
@@ -57,10 +59,12 @@ public sealed class LevelLogic
     private readonly bool[] spike;
     private readonly int[] doorIndexByCell;
     private readonly int[] keyIndexByCell;
+    private readonly int[] zoneIndexByCell;
     private readonly int goalIndex;
     private readonly int startIndex;
     private readonly int doorCount;
     private readonly int keyCount;
+    private readonly int zoneCount;
     private readonly int[] doorCells;
     private readonly int[] keyCells;
 
@@ -72,6 +76,7 @@ public sealed class LevelLogic
     public int StartIndex { get { return startIndex; } }
     public int DoorCount { get { return doorCount; } }
     public int KeyCount { get { return keyCount; } }
+    public int ZoneCount { get { return zoneCount; } }
 
     public LevelLogic(LevelData data)
     {
@@ -84,16 +89,19 @@ public sealed class LevelLogic
         spike = new bool[cellCount];
         doorIndexByCell = new int[cellCount];
         keyIndexByCell = new int[cellCount];
+        zoneIndexByCell = new int[cellCount];
         for (int i = 0; i < cellCount; i++)
         {
             doorIndexByCell[i] = -1;
             keyIndexByCell[i] = -1;
+            zoneIndexByCell[i] = -1;
         }
 
         int tempDoorCount = 0;
         int tempKeyCount = 0;
         int tempGoal = -1;
         int tempStart = -1;
+        System.Collections.Generic.List<int> zoneCells = new System.Collections.Generic.List<int>();
         System.Collections.Generic.List<LevelObjectData> objects = data.Objects;
         for (int i = 0; i < objects.Count; i++)
         {
@@ -153,6 +161,11 @@ public sealed class LevelLogic
             {
                 floor[index] = true;
             }
+            else if (type == LevelObjectType.RequiredZone)
+            {
+                floor[index] = true;
+                zoneCells.Add(index);
+            }
         }
 
         doorCount = tempDoorCount;
@@ -174,6 +187,78 @@ public sealed class LevelLogic
                 keyCells[k] = i;
             }
         }
+
+        zoneCount = BuildRequiredZones(zoneCells);
+    }
+
+    private int BuildRequiredZones(System.Collections.Generic.List<int> zoneCells)
+    {
+        if (zoneCells == null || zoneCells.Count == 0)
+        {
+            return 0;
+        }
+        bool[] marked = new bool[cellCount];
+        int zones = 0;
+        for (int i = 0; i < zoneCells.Count; i++)
+        {
+            int seed = zoneCells[i];
+            if (marked[seed] || zones >= MaxZones)
+            {
+                continue;
+            }
+            System.Collections.Generic.Queue<int> q = new System.Collections.Generic.Queue<int>();
+            q.Enqueue(seed);
+            marked[seed] = true;
+            zoneIndexByCell[seed] = zones;
+            while (q.Count > 0)
+            {
+                int cur = q.Dequeue();
+                int x;
+                int y;
+                FromIndex(cur, out x, out y);
+                TryZoneFlood(zoneCells, marked, q, zones, x + 1, y);
+                TryZoneFlood(zoneCells, marked, q, zones, x - 1, y);
+                TryZoneFlood(zoneCells, marked, q, zones, x, y + 1);
+                TryZoneFlood(zoneCells, marked, q, zones, x, y - 1);
+            }
+            zones++;
+        }
+        return zones;
+    }
+
+    private void TryZoneFlood(
+        System.Collections.Generic.List<int> zoneCells,
+        bool[] marked,
+        System.Collections.Generic.Queue<int> q,
+        int zoneId,
+        int x,
+        int y)
+    {
+        if (!InBounds(x, y))
+        {
+            return;
+        }
+        int i = ToIndex(x, y);
+        if (marked[i])
+        {
+            return;
+        }
+        bool isZone = false;
+        for (int z = 0; z < zoneCells.Count; z++)
+        {
+            if (zoneCells[z] == i)
+            {
+                isZone = true;
+                break;
+            }
+        }
+        if (!isZone)
+        {
+            return;
+        }
+        marked[i] = true;
+        zoneIndexByCell[i] = zoneId;
+        q.Enqueue(i);
     }
 
     public bool InBounds(int x, int y)
@@ -270,7 +355,44 @@ public sealed class LevelLogic
                 SetRock(ref state, ToIndex(obj.X, obj.Y), true);
             }
         }
+        state.ZoneVisitedMask = 0UL;
+        if (state.PlayerIndex >= 0)
+        {
+            MarkZoneVisit(ref state, state.PlayerIndex);
+        }
         return state;
+    }
+
+    public int GetZoneIndex(int cell)
+    {
+        if (cell < 0 || cell >= cellCount)
+        {
+            return -1;
+        }
+        return zoneIndexByCell[cell];
+    }
+
+    public bool AllZonesVisited(ref LevelSimState state)
+    {
+        if (zoneCount <= 0)
+        {
+            return true;
+        }
+        ulong need = zoneCount >= 64 ? ulong.MaxValue : ((1UL << zoneCount) - 1UL);
+        return (state.ZoneVisitedMask & need) == need;
+    }
+
+    private void MarkZoneVisit(ref LevelSimState state, int cell)
+    {
+        if (cell < 0 || cell >= cellCount)
+        {
+            return;
+        }
+        int z = zoneIndexByCell[cell];
+        if (z >= 0 && z < MaxZones)
+        {
+            state.ZoneVisitedMask |= (1UL << z);
+        }
     }
 
     public static bool HasEnemy(ref LevelSimState state, int index)
@@ -562,6 +684,7 @@ public sealed class LevelLogic
     private LevelActionResult FinishEnter(ref LevelSimState state, LevelActionResult baseResult, bool enforceMoveLimit)
     {
         int cell = state.PlayerIndex;
+        MarkZoneVisit(ref state, cell);
         int key = keyIndexByCell[cell];
         if (key >= 0 && ((state.KeyPresentMask & (1UL << key)) != 0UL))
         {
@@ -569,7 +692,7 @@ public sealed class LevelLogic
             state.KeysCollected++;
             baseResult = LevelActionResult.CollectedKey;
         }
-        if (cell == goalIndex)
+        if (cell == goalIndex && AllZonesVisited(ref state))
         {
             state.Won = true;
             return LevelActionResult.Won;
@@ -599,6 +722,7 @@ public sealed class LevelLogic
             hash = (hash ^ state.KeysCollected) * 1099511628211L;
             hash = (hash ^ (long)state.ClosedDoorMask) * 1099511628211L;
             hash = (hash ^ (long)state.KeyPresentMask) * 1099511628211L;
+            hash = (hash ^ (long)state.ZoneVisitedMask) * 1099511628211L;
             return hash;
         }
     }
@@ -616,6 +740,7 @@ public sealed class LevelLogic
             && a.RockMask3 == b.RockMask3
             && a.KeysCollected == b.KeysCollected
             && a.ClosedDoorMask == b.ClosedDoorMask
-            && a.KeyPresentMask == b.KeyPresentMask;
+            && a.KeyPresentMask == b.KeyPresentMask
+            && a.ZoneVisitedMask == b.ZoneVisitedMask;
     }
 }

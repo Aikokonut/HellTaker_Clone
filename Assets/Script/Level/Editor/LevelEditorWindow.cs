@@ -42,25 +42,18 @@ public sealed class LevelEditorWindow : EditorWindow
     private Vector2 actionScroll;
     private int genWidth = 8;
     private int genHeight = 8;
-    private bool genFreeGen = true;
-    private int genMaxAttempts = 120;
+    private int genMaxAttempts = 24;
     private int genSeed;
-    private int genMinEnemy;
-    private int genMaxEnemy = 3;
-    private int genMinRock;
-    private int genMaxRock = 4;
-    private int genMinSpike;
-    private int genMaxSpike = 8;
-    private int genMinPathExtra = 2;
-    private int genMaxPathExtra = 64;
-    private int genMinSolutions = 1;
-    private int genMaxSolutions = 48;
-    private int genMinMoveSlack;
-    private int genMaxMoveSlack = 4;
-    private int genMinDependencyDepth = 1;
-    private int genStateLimit = 60000;
-    private int genTimeLimitMs = 120;
+    private int genEnemyCount = 1;
+    private int genRockCount = 1;
+    private int genSpikeCount = 1;
+    private int genMaxCandidates = 3;
+    private int genCostSlack = 8;
+    private int genMaxTargetSolutions = 1;
+    private int genStateLimit = 100000;
+    private int genTimeLimitMs = 500;
     private LevelGenerateResult lastGenerateResult;
+    private string lastCalibrateMessage = "";
     private const string PrefLastLevelDir = "LevelEditor.LastLevelDataDir";
 
     [MenuItem("Tools/Level Editor")]
@@ -86,6 +79,8 @@ public sealed class LevelEditorWindow : EditorWindow
         EditorPrefs.SetFloat("LevelEditor.RightPanelWidth", rightPanelWidth);
         EditorPrefs.SetFloat("LevelEditor.MapZoom", mapZoom);
         EditorPrefs.SetFloat("LevelEditor.CellSize", cellSize);
+        DestroyOrphanCandidates();
+        lastGenerateResult = null;
     }
 
     private void OnGUI()
@@ -229,6 +224,7 @@ public sealed class LevelEditorWindow : EditorWindow
         PaletteButton(LevelObjectType.Key);
         PaletteButton(LevelObjectType.Door);
         PaletteButton(LevelObjectType.Goal);
+        PaletteButton(LevelObjectType.RequiredZone);
 
         GUILayout.Space(8f);
         if (levelData != null)
@@ -254,8 +250,12 @@ public sealed class LevelEditorWindow : EditorWindow
             GUILayout.Label("Grid Edges", EditorStyles.boldLabel);
             DrawGridResizeControls();
             cellSize = EditorGUILayout.Slider("Base Cell Size", cellSize, 12f, 48f);
-            maxStoredSolutions = EditorGUILayout.IntField("Max Solutions", maxStoredSolutions);
+            maxStoredSolutions = EditorGUILayout.IntField("Max Stored (Analyze)", maxStoredSolutions);
+            EditorGUILayout.HelpBox(
+                "Max Stored chỉ giới hạn số path lưu khi Analyze — không làm puzzle chỉ còn 1 lời giải.",
+                MessageType.None);
             GUILayout.Label("Hover: " + hoverCell.x + ", " + hoverCell.y);
+            GUILayout.Label("Cell: " + DescribeHoverCell(), EditorStyles.wordWrappedLabel);
             GUILayout.Label("Selected Id: " + selectedObjectId);
         }
 
@@ -266,12 +266,105 @@ public sealed class LevelEditorWindow : EditorWindow
         EditorGUILayout.EndVertical();
     }
 
+    private string DescribeHoverCell()
+    {
+        if (levelData == null || hoverCell.x < 0 || hoverCell.y < 0)
+        {
+            return "(none)";
+        }
+        if (hoverCell.x >= levelData.Width || hoverCell.y >= levelData.Height)
+        {
+            return "(out)";
+        }
+        System.Text.StringBuilder sb = new System.Text.StringBuilder(64);
+        List<LevelObjectData> objects = levelData.Objects;
+        int n = 0;
+        for (int i = 0; i < objects.Count; i++)
+        {
+            LevelObjectData obj = objects[i];
+            if (obj.X != hoverCell.x || obj.Y != hoverCell.y)
+            {
+                continue;
+            }
+            if (n > 0) sb.Append(" + ");
+            sb.Append(obj.Type.ToString());
+            sb.Append("#");
+            sb.Append(obj.Id);
+            n++;
+        }
+        if (n == 0) return "Empty";
+        return sb.ToString();
+    }
+
+    private static void SuggestGenParams(
+        LevelData data, out int rock, out int enemy, out int spike, out int slack)
+    {
+        rock = 1;
+        enemy = 0;
+        spike = 1;
+        slack = 6;
+        if (data == null) return;
+        LevelLogic logic = new LevelLogic(data);
+        int cells = logic.CellCount;
+        int floors = 0;
+        int choke = 0;
+        for (int i = 0; i < cells; i++)
+        {
+            if (!logic.IsFloor(i) || logic.IsSolid(i)) continue;
+            floors++;
+            int x, y;
+            logic.FromIndex(i, out x, out y);
+            int deg = 0;
+            if (logic.InBounds(x + 1, y) && logic.IsFloor(logic.ToIndex(x + 1, y)) && !logic.IsSolid(logic.ToIndex(x + 1, y))) deg++;
+            if (logic.InBounds(x - 1, y) && logic.IsFloor(logic.ToIndex(x - 1, y)) && !logic.IsSolid(logic.ToIndex(x - 1, y))) deg++;
+            if (logic.InBounds(x, y + 1) && logic.IsFloor(logic.ToIndex(x, y + 1)) && !logic.IsSolid(logic.ToIndex(x, y + 1))) deg++;
+            if (logic.InBounds(x, y - 1) && logic.IsFloor(logic.ToIndex(x, y - 1)) && !logic.IsSolid(logic.ToIndex(x, y - 1))) deg++;
+            if (deg > 0 && deg <= 2) choke++;
+        }
+        int shortLen = 12;
+        if (logic.StartIndex >= 0 && logic.GoalIndex >= 0)
+        {
+            // Approximate: manhattan as lower bound; prefer choke-based caps.
+            int sx, sy, gx, gy;
+            logic.FromIndex(logic.StartIndex, out sx, out sy);
+            logic.FromIndex(logic.GoalIndex, out gx, out gy);
+            int dx = sx - gx;
+            if (dx < 0) dx = -dx;
+            int dy = sy - gy;
+            if (dy < 0) dy = -dy;
+            shortLen = dx + dy;
+            if (shortLen < 4) shortLen = 4;
+        }
+        // Open map (few chokes): keep counts tiny.
+        if (choke < 3)
+        {
+            rock = 1;
+            enemy = 0;
+            spike = 1;
+            slack = shortLen / 2;
+            if (slack < 4) slack = 4;
+            if (slack > 8) slack = 8;
+            return;
+        }
+        rock = choke / 4;
+        if (rock < 1) rock = 1;
+        if (rock > 2) rock = 2;
+        enemy = choke / 5;
+        if (enemy > 2) enemy = 2;
+        spike = 1;
+        if (choke >= 8) spike = 2;
+        slack = shortLen / 2;
+        if (slack < 6) slack = 6;
+        if (slack > 12) slack = 12;
+    }
+
     private void DrawGeneratorPanel()
     {
-        GUILayout.Label("Generator (GD tool)", EditorStyles.boldLabel);
+        GUILayout.Label("Generator (Path-First)", EditorStyles.boldLabel);
         EditorGUILayout.HelpBox(
-            "Uses Level MoveLimit (never raised). GD objects are kept; only empty cells are filled.\n"
-            + "Difficulty = MoveLimit + Analyzer Min/Max ranges (not object count).",
+            "Chọn route Start→Zones→Goal, rồi gắn Rock/Enemy/Spike LÊN đường đi.\n"
+            + "Mỗi object phải tăng cost hoặc xuất hiện Push/Kick/Spike trên optimal path.\n"
+            + "Base map hẹp (choke) + count thấp = giống Helltaker hơn.",
             MessageType.Info);
 
         EditorGUI.BeginChangeCheck();
@@ -284,28 +377,64 @@ public sealed class LevelEditorWindow : EditorWindow
             genHeight = levelData.Height;
         }
 
+        GUILayout.Label("Object Counts (max)", EditorStyles.boldLabel);
         if (levelData != null)
         {
-            GUILayout.Label("MoveLimit (fixed): " + levelData.MoveLimit);
+            int sugR, sugE, sugS, sugSlack;
+            SuggestGenParams(levelData, out sugR, out sugE, out sugS, out sugSlack);
+            EditorGUILayout.HelpBox(
+                "Gợi ý topology: Rock≤" + sugR + " Enemy≤" + sugE + " Spike≤" + sugS
+                + " CostSlack≈" + sugSlack
+                + "\nCalibrate từ level Helltaker đầy đủ (có E/R/S) chính xác hơn.",
+                MessageType.Info);
+            if (GUILayout.Button("Apply Suggested Counts"))
+            {
+                genRockCount = sugR;
+                genEnemyCount = sugE;
+                genSpikeCount = sugS;
+                genCostSlack = sugSlack;
+            }
+            if (GUILayout.Button("Calibrate From This Level (strip E/R/S)"))
+            {
+                LevelCalibrateResult cal = LevelAnalyzer.CalibrateFromReference(levelData);
+                lastCalibrateMessage = cal.Message;
+                if (cal.Success)
+                {
+                    genEnemyCount = cal.EnemyCount;
+                    genRockCount = cal.RockCount;
+                    genSpikeCount = cal.SpikeCount;
+                    genCostSlack = cal.CostSlack;
+                    genMaxTargetSolutions = cal.RecommendedMaxTargetSolutions;
+                    genMaxAttempts = cal.RecommendedAttempts;
+                    statusMessage = cal.Message;
+                }
+                else
+                {
+                    statusMessage = cal.Message;
+                }
+            }
+            if (!string.IsNullOrEmpty(lastCalibrateMessage))
+            {
+                EditorGUILayout.HelpBox(lastCalibrateMessage, MessageType.None);
+            }
         }
-
-        genFreeGen = EditorGUILayout.Toggle("FreeGen (GD)", genFreeGen);
-        GUILayout.Label("Analyzer Ranges", EditorStyles.boldLabel);
-        genMinPathExtra = EditorGUILayout.IntField("Min Path Extra", genMinPathExtra);
-        genMaxPathExtra = EditorGUILayout.IntField("Max Path Extra", genMaxPathExtra);
-        genMinSolutions = EditorGUILayout.IntField("Min Solutions", genMinSolutions);
-        genMaxSolutions = EditorGUILayout.IntField("Max Solutions", genMaxSolutions);
-        genMinMoveSlack = EditorGUILayout.IntField("Min MoveSlack", genMinMoveSlack);
-        genMaxMoveSlack = EditorGUILayout.IntField("Max MoveSlack", genMaxMoveSlack);
-        genMinDependencyDepth = EditorGUILayout.IntField("Min Dependency Depth", genMinDependencyDepth);
-        GUILayout.Label("Placement Caps (Min/Max)", EditorStyles.boldLabel);
-        genMinEnemy = EditorGUILayout.IntField("Min Enemy", genMinEnemy);
-        genMaxEnemy = EditorGUILayout.IntField("Max Enemy", genMaxEnemy);
-        genMinRock = EditorGUILayout.IntField("Min Rock", genMinRock);
-        genMaxRock = EditorGUILayout.IntField("Max Rock", genMaxRock);
-        genMinSpike = EditorGUILayout.IntField("Min Spike", genMinSpike);
-        genMaxSpike = EditorGUILayout.IntField("Max Spike", genMaxSpike);
-        genMaxAttempts = EditorGUILayout.IntField("MaxAttempts", genMaxAttempts);
+        genEnemyCount = EditorGUILayout.IntField("Enemy Count", genEnemyCount);
+        genRockCount = EditorGUILayout.IntField("Rock Count", genRockCount);
+        genSpikeCount = EditorGUILayout.IntField("Spike Count", genSpikeCount);
+        GUILayout.Label("Budget", EditorStyles.boldLabel);
+        genCostSlack = EditorGUILayout.IntField("Cost Slack", genCostSlack);
+        EditorGUILayout.HelpBox(
+            "Count = mục tiêu tối đa; mỗi object phải +OptimalCost (Rock delta≤3).\n"
+            + "Spike đặt trước Rock. Budget = CostSlack (không softCap chặt).\n"
+            + "Muốn đủ 3 Spike: CostSlack ≥ Spike + Rock budget (vd Slack 10–14).",
+            MessageType.None);
+        genMaxCandidates = EditorGUILayout.IntField("Keep Candidates", genMaxCandidates);
+        genMaxTargetSolutions = EditorGUILayout.IntField("Max Target Solutions", genMaxTargetSolutions);
+        EditorGUILayout.HelpBox(
+            "Max Target Solutions = số lời giải tối ưu tối đa (1 = unique, khó).\n"
+            + "Gen reject candidate nếu SolutionCount > giá trị này.",
+            MessageType.None);
+        genMaxAttempts = EditorGUILayout.IntField("Max Attempts", genMaxAttempts);
         genSeed = EditorGUILayout.IntField("Seed (0=random)", genSeed);
         GUILayout.Label("Performance", EditorStyles.boldLabel);
         genStateLimit = EditorGUILayout.IntField("StateLimit", genStateLimit);
@@ -318,37 +447,42 @@ public sealed class LevelEditorWindow : EditorWindow
 
     private void DrawLastGenerateReport()
     {
-        if (lastGenerateResult == null || !lastGenerateResult.Success)
+        if (lastGenerateResult == null)
         {
             return;
         }
         GUILayout.Space(8f);
         GUILayout.Label("Last Generate Output", EditorStyles.boldLabel);
-        if (!string.IsNullOrEmpty(lastGenerateResult.PatternUsed))
+        if (!lastGenerateResult.Success)
         {
-            GUILayout.Label("Pattern: " + lastGenerateResult.PatternUsed);
+            EditorGUILayout.HelpBox(lastGenerateResult.Message, MessageType.Warning);
+            return;
         }
-        GUILayout.Label("Difficulty: " + lastGenerateResult.EstimatedDifficulty + " / 10");
-        GUILayout.Label("Base shortest: " + lastGenerateResult.BaseShortest);
-        GUILayout.Label("Minimum moves: " + lastGenerateResult.MinimumMoves);
-        GUILayout.Label("Path extra: " + lastGenerateResult.PathExtra);
-        GUILayout.Label("Action tax: " + lastGenerateResult.ActionTax);
-        GUILayout.Label("MoveLimit: " + (lastGenerateResult.MinimumMoves + lastGenerateResult.MoveSlack));
-        GUILayout.Label("Move slack: " + lastGenerateResult.MoveSlack);
-        GUILayout.Label("Solutions <= MoveLimit: " + lastGenerateResult.TotalSolutions);
-        GUILayout.Label("Dependency depth: " + lastGenerateResult.DependencyDepth);
-        GUILayout.Label("Decision points: " + lastGenerateResult.DecisionPoints);
-        GUILayout.Label("Solutions by moves:");
-        for (int i = 0; i < lastGenerateResult.SolutionsByMoves.Count; i++)
+        GUILayout.Label("Attempts: " + lastGenerateResult.AttemptsUsed);
+        if (!string.IsNullOrEmpty(lastGenerateResult.ChainSummary))
         {
-            LevelSolutionBucket b = lastGenerateResult.SolutionsByMoves[i];
-            GUILayout.Label("  " + b.Moves + " moves: " + b.Count);
+            GUILayout.Label("Best: " + lastGenerateResult.ChainSummary);
         }
-        GUILayout.Label("Deadlocks: " + lastGenerateResult.Deadlocks.Count);
-        for (int i = 0; i < lastGenerateResult.Deadlocks.Count; i++)
+        List<LevelCandidateInfo> candidates = lastGenerateResult.Candidates;
+        for (int i = 0; i < candidates.Count; i++)
         {
-            LevelDeadlockInfo d = lastGenerateResult.Deadlocks[i];
-            GUILayout.Label("  " + d.ObjectType + " @" + d.Cell.x + "," + d.Cell.y + " - " + d.Reason);
+            LevelCandidateInfo c = candidates[i];
+            string title = c.IsBest ? "[BEST] Candidate " + (i + 1) : "Candidate " + (i + 1);
+            GUILayout.Label(title, c.IsBest ? EditorStyles.boldLabel : EditorStyles.label);
+            GUILayout.Label("  OptimalCost: " + c.OptimalCost);
+            GUILayout.Label("  MoveLimit: " + c.MoveLimit);
+            GUILayout.Label("  MoveSlack: " + c.MoveSlack);
+            GUILayout.Label("  SolutionCount: " + c.SolutionCount);
+            GUILayout.Label("  NearMissCost: " + c.NearMissCost);
+            GUILayout.Label("  DecisionPoints: " + c.DecisionPoints);
+            GUILayout.Label("  DependencyDepth: " + c.DependencyDepth);
+            GUILayout.Label("  ObjectImpactCount: " + c.ObjectImpactCount);
+            GUILayout.Label("  RouteDiversity: " + c.RouteDiversity);
+            GUILayout.Label("  Score: " + c.Score);
+            if (!c.IsBest && c.Level != null && GUILayout.Button("Apply Candidate " + (i + 1)))
+            {
+                ApplyGenerateCandidate(c);
+            }
         }
     }
 
@@ -560,6 +694,12 @@ public sealed class LevelEditorWindow : EditorWindow
             if (obj.Type == LevelObjectType.Floor)
             {
                 color.a = 0.85f;
+            }
+            if (obj.Type == LevelObjectType.RequiredZone)
+            {
+                Color floorTint = new Color(0.25f, 0.25f, 0.28f, 0.85f);
+                EditorGUI.DrawRect(cellRect, floorTint);
+                color.a = 0.55f;
             }
             EditorGUI.DrawRect(cellRect, color);
             if (obj.Id == selectedObjectId)
@@ -1003,6 +1143,7 @@ public sealed class LevelEditorWindow : EditorWindow
             GUILayout.Label("Floor " + analysis.Counts.Floor + " Wall " + analysis.Counts.Wall + " Boundary " + analysis.Counts.Boundary);
             GUILayout.Label("Player " + analysis.Counts.PlayerStart + " Enemy " + analysis.Counts.Enemy + " Rock " + analysis.Counts.Rock);
             GUILayout.Label("Spike " + analysis.Counts.Spike + " Key " + analysis.Counts.Key + " Door " + analysis.Counts.Door + " Goal " + analysis.Counts.Goal);
+            GUILayout.Label("RequiredZone " + analysis.Counts.RequiredZone);
             GUILayout.Space(6f);
             GUILayout.Label("Validation Issues", EditorStyles.boldLabel);
             for (int i = 0; i < analysis.ValidationIssues.Count; i++)
@@ -1141,39 +1282,29 @@ public sealed class LevelEditorWindow : EditorWindow
         genParams.BaseMap = levelData;
         genParams.Width = genWidth;
         genParams.Height = genHeight;
-        genParams.FreeGen = genFreeGen;
-        genParams.MoveLimit = levelData.MoveLimit;
         genParams.MaxAttempts = genMaxAttempts;
         genParams.Seed = genSeed;
+        genParams.EnemyCount = genEnemyCount;
+        genParams.RockCount = genRockCount;
+        genParams.SpikeCount = genSpikeCount;
+        genParams.MaxCandidates = genMaxCandidates;
+        genParams.CostSlack = genCostSlack;
+        genParams.MaxTargetSolutions = genMaxTargetSolutions;
         genParams.StateLimit = genStateLimit;
         genParams.TimeLimitMs = genTimeLimitMs;
-        LevelDifficultyTargets targets = new LevelDifficultyTargets();
-        targets.MinEnemy = genMinEnemy;
-        targets.MaxEnemy = genMaxEnemy;
-        targets.MinRock = genMinRock;
-        targets.MaxRock = genMaxRock;
-        targets.MinSpike = genMinSpike;
-        targets.MaxSpike = genMaxSpike;
-        targets.MinPathExtra = genMinPathExtra;
-        targets.MaxPathExtra = genMaxPathExtra;
-        targets.MinSolutions = genMinSolutions;
-        targets.MaxSolutions = genMaxSolutions;
-        targets.MinMoveSlack = genMinMoveSlack;
-        targets.MaxMoveSlack = genMaxMoveSlack;
-        targets.MinDependencyDepth = genMinDependencyDepth;
-        genParams.Targets = targets;
 
-        EditorUtility.DisplayProgressBar("Generate Level", "Pattern place → cheap check → solve...", 0.5f);
+        EditorUtility.DisplayProgressBar("Generate Level", "Path-first: route → objects on path → solve...", 0.5f);
         LevelGenerateResult generated;
         try
         {
-            generated = LevelBackwardGenerator.Generate(genParams);
+            generated = LevelRouteGenerator.Generate(genParams);
         }
         finally
         {
             EditorUtility.ClearProgressBar();
         }
 
+        DestroyOrphanCandidates();
         lastGenerateResult = generated;
 
         if (!generated.Success || generated.Level == null)
@@ -1187,7 +1318,6 @@ public sealed class LevelEditorWindow : EditorWindow
 
         PushUndo();
         levelData.CopyFrom(generated.Level);
-        Object.DestroyImmediate(generated.Level);
         EditorUtility.SetDirty(levelData);
 
         analysis = null;
@@ -1199,6 +1329,47 @@ public sealed class LevelEditorWindow : EditorWindow
         EditorUtility.DisplayDialog("Generate Level", generated.Message, "OK");
         Debug.Log(generated.Message);
         Repaint();
+    }
+
+    private void ApplyGenerateCandidate(LevelCandidateInfo candidate)
+    {
+        if (levelData == null || candidate == null || candidate.Level == null || lastGenerateResult == null)
+        {
+            return;
+        }
+        PushUndo();
+        levelData.CopyFrom(candidate.Level);
+        EditorUtility.SetDirty(levelData);
+        for (int i = 0; i < lastGenerateResult.Candidates.Count; i++)
+        {
+            lastGenerateResult.Candidates[i].IsBest = (lastGenerateResult.Candidates[i] == candidate);
+        }
+        analysis = null;
+        shownSolution.Clear();
+        selectedSolutionIndex = 0;
+        showSolution = false;
+        RunAnalyze();
+        statusMessage = "Applied candidate: " + candidate.Summary;
+        Repaint();
+    }
+
+    private void DestroyOrphanCandidates()
+    {
+        if (lastGenerateResult == null)
+        {
+            return;
+        }
+        for (int i = 0; i < lastGenerateResult.Candidates.Count; i++)
+        {
+            LevelCandidateInfo c = lastGenerateResult.Candidates[i];
+            if (c.Level != null)
+            {
+                Object.DestroyImmediate(c.Level);
+                c.Level = null;
+            }
+        }
+        lastGenerateResult.Candidates.Clear();
+        lastGenerateResult.Level = null;
     }
 
     private void SaveLevel(bool saveAs)
