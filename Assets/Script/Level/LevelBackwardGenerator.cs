@@ -7,16 +7,10 @@ public sealed class LevelGenerateParams
     public int Width = 8;
     public int Height = 8;
     public bool FreeGen = true;
-    public int TargetSolutions = 1;
     public int MoveLimit = 10;
-    public int MoveLimitSlack = 2;
-    public int MinPathExtra = 2;
-    public int SolutionCountCap = 48;
     public int MaxAttempts = 120;
     public int Seed = 0;
-    public int MaxEnemy = 3;
-    public int MaxRock = 4;
-    public int MaxSpike = 8;
+    public LevelDifficultyTargets Targets = new LevelDifficultyTargets();
     public int StateLimit = 60000;
     public int TimeLimitMs = 120;
 }
@@ -49,7 +43,8 @@ public sealed class LevelGenerateResult
 }
 
 /// <summary>
-/// Pattern generator: GD draws Floor/Wall/Start/Goal; FreeGen composes KeyDoor+Spike+Enemy/Rock on critical path.
+/// Pattern generator: GD draws base map (any objects kept); FreeGen fills empty cells only.
+/// MoveLimit is taken from the level and never raised by generation.
 /// </summary>
 public static class LevelBackwardGenerator
 {
@@ -76,6 +71,10 @@ public static class LevelBackwardGenerator
             result.Message = "Generation Failed: draw a base map first.";
             return result;
         }
+        if (genParams.Targets == null)
+        {
+            genParams.Targets = new LevelDifficultyTargets();
+        }
 
         string paramError;
         if (!ValidateParams(genParams, out paramError))
@@ -92,9 +91,18 @@ public static class LevelBackwardGenerator
             return result;
         }
 
-        LevelData stripped;
+        int fixedMoveLimit = genParams.BaseMap.MoveLimit;
+        if (fixedMoveLimit < 0)
+        {
+            result.Message = "Generation Failed: Level MoveLimit cannot be negative.";
+            return result;
+        }
+        genParams.MoveLimit = fixedMoveLimit;
+
+        LevelData baseCopy;
+        bool[] protectedCell;
         string baseError;
-        if (!TryCreateStrippedBase(genParams.BaseMap, out stripped, out baseError))
+        if (!TryCreatePreservedBase(genParams.BaseMap, out baseCopy, out protectedCell, out baseError))
         {
             result.Message = "Generation Failed: " + baseError;
             return result;
@@ -102,18 +110,18 @@ public static class LevelBackwardGenerator
 
         Topology topo;
         string topoError;
-        if (!TryBuildTopology(stripped, out topo, out topoError))
+        if (!TryBuildTopology(baseCopy, out topo, out topoError))
         {
-            Object.DestroyImmediate(stripped);
+            Object.DestroyImmediate(baseCopy);
             result.Message = "Generation Failed: " + topoError;
             return result;
         }
 
-        if (topo.ShortestLen > genParams.MoveLimit && genParams.MoveLimit > 0 && !genParams.FreeGen)
+        if (topo.ShortestLen > fixedMoveLimit && fixedMoveLimit > 0)
         {
-            Object.DestroyImmediate(stripped);
+            Object.DestroyImmediate(baseCopy);
             result.Message = "Generation Failed: base shortest path ("
-                + topo.ShortestLen + ") exceeds MoveLimit (" + genParams.MoveLimit + ").";
+                + topo.ShortestLen + ") exceeds MoveLimit (" + fixedMoveLimit + ").";
             return result;
         }
 
@@ -132,6 +140,13 @@ public static class LevelBackwardGenerator
 
         string lastError = "No attempt ran.";
         SearchBudget budget = new SearchBudget(genParams.StateLimit, genParams.TimeLimitMs);
+        LevelData bestLevel = null;
+        CountResult bestCount = null;
+        PatternId bestPattern = PatternId.Compose;
+        int bestAttempt = 0;
+        int bestScore = int.MinValue;
+
+        LevelDifficultyTargets t = genParams.Targets;
 
         for (int attempt = 1; attempt <= genParams.MaxAttempts; attempt++)
         {
@@ -140,24 +155,12 @@ public static class LevelBackwardGenerator
                 ? PatternId.Compose
                 : exactPatterns[rng.Next(0, exactPatterns.Length)];
 
-            LevelData candidate = stripped.CreateRuntimeCopy();
-
-            int searchMoveLimit;
-            if (genParams.FreeGen)
-            {
-                searchMoveLimit = topo.ShortestLen + 40 + genParams.MaxSpike * 2;
-                if (searchMoveLimit < 16)
-                {
-                    searchMoveLimit = 16;
-                }
-            }
-            else
-            {
-                searchMoveLimit = genParams.MoveLimit;
-            }
-            candidate.MoveLimit = searchMoveLimit;
+            LevelData candidate = baseCopy.CreateRuntimeCopy();
+            candidate.MoveLimit = fixedMoveLimit;
 
             PlacementState place = new PlacementState(topo.CellCount);
+            SeedPlacementFromExisting(candidate, place, protectedCell);
+
             string placeError;
             if (genParams.FreeGen)
             {
@@ -179,6 +182,21 @@ public static class LevelBackwardGenerator
                 TryAddOptionalAccents(candidate, topo, genParams, rng, place, pattern);
             }
 
+            string impactError;
+            if (!LevelAnalyzer.AllPuzzleObjectsHaveImpact(candidate, protectedCell, out impactError))
+            {
+                Object.DestroyImmediate(candidate);
+                lastError = "Impact: " + impactError;
+                continue;
+            }
+
+            if (!CountsInRange(candidate, t, out placeError))
+            {
+                Object.DestroyImmediate(candidate);
+                lastError = placeError;
+                continue;
+            }
+
             string cheapError;
             if (!CheapValidate(candidate, topo, genParams, out cheapError))
             {
@@ -187,71 +205,17 @@ public static class LevelBackwardGenerator
                 continue;
             }
 
-            int abortAbove = genParams.FreeGen
-                ? genParams.SolutionCountCap
-                : genParams.TargetSolutions;
-
-            CountResult count = CountSolutions(candidate, abortAbove, budget);
-
-            if (genParams.FreeGen)
+            int abortAbove = t.MaxSolutions;
+            if (abortAbove < 1)
             {
-                if (count.MinimumMoves < 0 || count.Total <= 0)
-                {
-                    Object.DestroyImmediate(candidate);
-                    lastError = count.Status == CountStatus.Inconclusive
-                        ? "Solver budget exhausted before any solution."
-                        : "Unsolvable.";
-                    continue;
-                }
-
-                int pathExtra = count.MinimumMoves - topo.ShortestLen;
-                int minExtra = genParams.MinPathExtra;
-                if (minExtra < 0)
-                {
-                    minExtra = 0;
-                }
-                if (pathExtra < minExtra)
-                {
-                    Object.DestroyImmediate(candidate);
-                    lastError = "Too easy: pathExtra=" + pathExtra + " < " + minExtra + ".";
-                    continue;
-                }
-
-                int depth = MeasureDependencyDepth(candidate, count.SamplePath);
-                if (depth < 1)
-                {
-                    Object.DestroyImmediate(candidate);
-                    lastError = "Too easy: no forced interactions on solution.";
-                    continue;
-                }
-
-                int slack = genParams.MoveLimitSlack;
-                if (slack < 0)
-                {
-                    slack = 0;
-                }
-                int finalLimit = count.MinimumMoves + slack;
-                candidate.MoveLimit = finalLimit;
-
-                int within = CountWithinMoveLimit(count, finalLimit);
-                count.Total = within;
-                TrimBuckets(count, finalLimit);
-                if (within <= 0)
-                {
-                    Object.DestroyImmediate(candidate);
-                    lastError = "No solutions within final MoveLimit.";
-                    continue;
-                }
-
-                FillSuccess(result, candidate, count, pattern, attempt, finalLimit, true, topo.ShortestLen);
-                Object.DestroyImmediate(stripped);
-                return result;
+                abortAbove = 1;
             }
+            CountResult count = CountSolutions(candidate, abortAbove, budget);
 
             if (count.Status == CountStatus.TooMany)
             {
                 Object.DestroyImmediate(candidate);
-                lastError = "Too many solutions (>" + genParams.TargetSolutions + ").";
+                lastError = "Too many solutions (>" + t.MaxSolutions + ").";
                 continue;
             }
             if (count.Status == CountStatus.Unsolvable)
@@ -266,22 +230,87 @@ public static class LevelBackwardGenerator
                 lastError = "Solver budget exhausted (solutions found=" + count.Total + ").";
                 continue;
             }
-            if (count.Total != genParams.TargetSolutions)
+            if (count.MinimumMoves < 0 || count.Total <= 0)
             {
                 Object.DestroyImmediate(candidate);
-                lastError = "Got " + count.Total + " solutions, target " + genParams.TargetSolutions + ".";
+                lastError = "Unsolvable within MoveLimit.";
+                continue;
+            }
+            if (fixedMoveLimit > 0 && count.MinimumMoves > fixedMoveLimit)
+            {
+                Object.DestroyImmediate(candidate);
+                lastError = "Minimum moves exceed MoveLimit.";
                 continue;
             }
 
-            candidate.MoveLimit = genParams.MoveLimit;
-            FillSuccess(result, candidate, count, pattern, attempt, genParams.MoveLimit, false, topo.ShortestLen);
-            Object.DestroyImmediate(stripped);
+            int pathExtra = count.MinimumMoves - topo.ShortestLen;
+            if (pathExtra < t.MinPathExtra || pathExtra > t.MaxPathExtra)
+            {
+                Object.DestroyImmediate(candidate);
+                lastError = "PathExtra out of range (" + pathExtra + ").";
+                continue;
+            }
+
+            int slack = fixedMoveLimit > 0 ? fixedMoveLimit - count.MinimumMoves : 0;
+            if (fixedMoveLimit > 0 && (slack < t.MinMoveSlack || slack > t.MaxMoveSlack))
+            {
+                Object.DestroyImmediate(candidate);
+                lastError = "MoveSlack out of range (" + slack + ").";
+                continue;
+            }
+
+            int within = CountWithinMoveLimit(count, fixedMoveLimit > 0 ? fixedMoveLimit : count.MinimumMoves);
+            count.Total = within;
+            if (fixedMoveLimit > 0)
+            {
+                TrimBuckets(count, fixedMoveLimit);
+            }
+            if (within < t.MinSolutions || within > t.MaxSolutions)
+            {
+                Object.DestroyImmediate(candidate);
+                lastError = "Solutions within MoveLimit out of range (" + within + ").";
+                continue;
+            }
+
+            int depth = MeasureDependencyDepth(candidate, count.SamplePath);
+            if (depth < t.MinDependencyDepth)
+            {
+                Object.DestroyImmediate(candidate);
+                lastError = "Dependency depth below minimum (" + depth + ").";
+                continue;
+            }
+
+            LevelGenerateResult probe = new LevelGenerateResult();
+            FillSuccess(probe, candidate, count, pattern, attempt, fixedMoveLimit, genParams.FreeGen, topo.ShortestLen);
+            int score = probe.EstimatedDifficulty * 1000 + pathExtra * 10 + depth - slack;
+            if (score > bestScore)
+            {
+                if (bestLevel != null)
+                {
+                    Object.DestroyImmediate(bestLevel);
+                }
+                bestLevel = candidate;
+                bestCount = count;
+                bestPattern = pattern;
+                bestAttempt = attempt;
+                bestScore = score;
+            }
+            else
+            {
+                Object.DestroyImmediate(candidate);
+            }
+        }
+
+        if (bestLevel == null)
+        {
+            Object.DestroyImmediate(baseCopy);
+            result.Message = "Generation Failed after " + genParams.MaxAttempts
+                + " attempt(s). Inputs unchanged. Last: " + lastError;
             return result;
         }
 
-        Object.DestroyImmediate(stripped);
-        result.Message = "Generation Failed after " + genParams.MaxAttempts
-            + " attempt(s). Inputs unchanged. Last: " + lastError;
+        FillSuccess(result, bestLevel, bestCount, bestPattern, bestAttempt, fixedMoveLimit, genParams.FreeGen, topo.ShortestLen);
+        Object.DestroyImmediate(baseCopy);
         return result;
     }
 
@@ -381,27 +410,7 @@ public static class LevelBackwardGenerator
             error = "Grid exceeds max cells.";
             return false;
         }
-        if (!p.FreeGen && p.TargetSolutions < 1)
-        {
-            error = "Target Solutions must be >= 1.";
-            return false;
-        }
-        if (p.FreeGen && p.SolutionCountCap < 1)
-        {
-            error = "SolutionCountCap must be >= 1.";
-            return false;
-        }
-        if (p.MoveLimitSlack < 0)
-        {
-            error = "MoveLimitSlack cannot be negative.";
-            return false;
-        }
-        if (p.MinPathExtra < 0)
-        {
-            error = "MinPathExtra cannot be negative.";
-            return false;
-        }
-        if (!p.FreeGen && p.MoveLimit < 0)
+        if (p.MoveLimit < 0)
         {
             error = "MoveLimit cannot be negative.";
             return false;
@@ -411,50 +420,173 @@ public static class LevelBackwardGenerator
             error = "MaxAttempts must be >= 1.";
             return false;
         }
-        if (p.MaxEnemy < 0 || p.MaxRock < 0 || p.MaxSpike < 0)
-        {
-            error = "Max Enemy/Rock/Spike cannot be negative.";
-            return false;
-        }
         if (p.StateLimit < 1 || p.TimeLimitMs < 1)
         {
             error = "StateLimit/TimeLimitMs must be >= 1.";
             return false;
         }
+        LevelDifficultyTargets t = p.Targets;
+        if (t == null)
+        {
+            error = "Targets required.";
+            return false;
+        }
+        if (t.MinEnemy < 0 || t.MaxEnemy < t.MinEnemy
+            || t.MinRock < 0 || t.MaxRock < t.MinRock
+            || t.MinSpike < 0 || t.MaxSpike < t.MinSpike)
+        {
+            error = "Enemy/Rock/Spike Min/Max invalid.";
+            return false;
+        }
+        if (t.MinPathExtra < 0 || t.MaxPathExtra < t.MinPathExtra)
+        {
+            error = "PathExtra Min/Max invalid.";
+            return false;
+        }
+        if (t.MinSolutions < 1 || t.MaxSolutions < t.MinSolutions)
+        {
+            error = "Solutions Min/Max invalid.";
+            return false;
+        }
+        if (t.MinMoveSlack < 0 || t.MaxMoveSlack < t.MinMoveSlack)
+        {
+            error = "MoveSlack Min/Max invalid.";
+            return false;
+        }
+        if (t.MinDependencyDepth < 0)
+        {
+            error = "MinDependencyDepth cannot be negative.";
+            return false;
+        }
         return true;
     }
 
-    private static bool TryCreateStrippedBase(LevelData source, out LevelData stripped, out string error)
+    private static bool TryCreatePreservedBase(
+        LevelData source, out LevelData copy, out bool[] protectedCell, out string error)
     {
-        stripped = null;
+        copy = null;
+        protectedCell = null;
         error = null;
-        LevelData copy = source.CreateRuntimeCopy();
-        List<LevelObjectData> objects = copy.Objects;
-        for (int i = objects.Count - 1; i >= 0; i--)
-        {
-            LevelObjectType t = objects[i].Type;
-            if (t == LevelObjectType.Enemy || t == LevelObjectType.Rock || t == LevelObjectType.Spike
-                || t == LevelObjectType.Key || t == LevelObjectType.Door)
-            {
-                objects.RemoveAt(i);
-            }
-        }
-        copy.SyncDerivedFields();
-        LevelValidationResult v = LevelValidator.Validate(copy);
+        LevelData working = source.CreateRuntimeCopy();
+        working.MoveLimit = source.MoveLimit;
+        working.SyncDerivedFields();
+        LevelValidationResult v = LevelValidator.Validate(working);
         if (!v.IsValid)
         {
             string detail = v.Issues.Count > 0 ? v.Issues[0].Message : "invalid";
-            Object.DestroyImmediate(copy);
+            Object.DestroyImmediate(working);
             error = "Base map invalid: " + detail;
             return false;
         }
-        if (copy.PlayerStart.x < 0 || copy.Goal.x < 0)
+        if (working.PlayerStart.x < 0 || working.Goal.x < 0)
         {
-            Object.DestroyImmediate(copy);
+            Object.DestroyImmediate(working);
             error = "Base map needs PlayerStart and Goal.";
             return false;
         }
-        stripped = copy;
+        int cells = working.Width * working.Height;
+        protectedCell = new bool[cells];
+        List<LevelObjectData> objects = working.Objects;
+        for (int i = 0; i < objects.Count; i++)
+        {
+            LevelObjectData obj = objects[i];
+            if (obj.X < 0 || obj.Y < 0 || obj.X >= working.Width || obj.Y >= working.Height)
+            {
+                continue;
+            }
+            LevelObjectType type = obj.Type;
+            if (type == LevelObjectType.Floor)
+            {
+                continue;
+            }
+            int cell = obj.Y * working.Width + obj.X;
+            protectedCell[cell] = true;
+        }
+        copy = working;
+        return true;
+    }
+
+    private static void SeedPlacementFromExisting(LevelData level, PlacementState place, bool[] protectedCell)
+    {
+        List<LevelObjectData> objects = level.Objects;
+        for (int i = 0; i < objects.Count; i++)
+        {
+            LevelObjectData obj = objects[i];
+            if (obj.X < 0 || obj.Y < 0 || obj.X >= level.Width || obj.Y >= level.Height)
+            {
+                continue;
+            }
+            int cell = obj.Y * level.Width + obj.X;
+            if (obj.Type == LevelObjectType.Floor)
+            {
+                continue;
+            }
+            place.Used[cell] = true;
+            if (obj.Type == LevelObjectType.Enemy)
+            {
+                place.Enemy++;
+                place.Pushable[cell] = true;
+            }
+            else if (obj.Type == LevelObjectType.Rock)
+            {
+                place.Rock++;
+                place.Pushable[cell] = true;
+            }
+            else if (obj.Type == LevelObjectType.Spike)
+            {
+                place.Spike++;
+            }
+            else if (obj.Type == LevelObjectType.Key)
+            {
+                place.Key++;
+            }
+            else if (obj.Type == LevelObjectType.Door)
+            {
+                place.Door++;
+            }
+        }
+        if (protectedCell != null)
+        {
+            int n = place.Used.Length < protectedCell.Length ? place.Used.Length : protectedCell.Length;
+            for (int i = 0; i < n; i++)
+            {
+                if (protectedCell[i])
+                {
+                    place.Used[i] = true;
+                }
+            }
+        }
+    }
+
+    private static bool CountsInRange(LevelData level, LevelDifficultyTargets t, out string error)
+    {
+        error = null;
+        int enemy = 0;
+        int rock = 0;
+        int spike = 0;
+        List<LevelObjectData> objects = level.Objects;
+        for (int i = 0; i < objects.Count; i++)
+        {
+            LevelObjectType type = objects[i].Type;
+            if (type == LevelObjectType.Enemy) enemy++;
+            else if (type == LevelObjectType.Rock) rock++;
+            else if (type == LevelObjectType.Spike) spike++;
+        }
+        if (enemy < t.MinEnemy || enemy > t.MaxEnemy)
+        {
+            error = "Enemy count " + enemy + " out of [" + t.MinEnemy + "," + t.MaxEnemy + "].";
+            return false;
+        }
+        if (rock < t.MinRock || rock > t.MaxRock)
+        {
+            error = "Rock count " + rock + " out of [" + t.MinRock + "," + t.MaxRock + "].";
+            return false;
+        }
+        if (spike < t.MinSpike || spike > t.MaxSpike)
+        {
+            error = "Spike count " + spike + " out of [" + t.MinSpike + "," + t.MaxSpike + "].";
+            return false;
+        }
         return true;
     }
 
@@ -479,6 +611,7 @@ public static class LevelBackwardGenerator
     private sealed class PlacementState
     {
         public bool[] Used;
+        public bool[] Pushable;
         public int Enemy;
         public int Rock;
         public int Spike;
@@ -488,6 +621,7 @@ public static class LevelBackwardGenerator
         public PlacementState(int cells)
         {
             Used = new bool[cells];
+            Pushable = new bool[cells];
         }
     }
 
@@ -639,36 +773,74 @@ public static class LevelBackwardGenerator
         LevelData level, Topology topo, LevelGenerateParams p, System.Random rng, PlacementState place, out string error)
     {
         error = null;
-        if (!TryPlaceKeyDoorDetour(level, topo, rng, place, out error))
+        LevelDifficultyTargets t = p.Targets;
+
+        if (place.Door < 1)
         {
-            return false;
+            if (!TryPlaceKeyDoorDetour(level, topo, rng, place, out error))
+            {
+                return false;
+            }
         }
 
-        if (p.MaxSpike > 0)
+        if (place.Spike < t.MinSpike)
         {
-            int spikeWant = p.MaxSpike;
-            if (p.MaxSpike >= 2)
+            int spikeWant = t.MinSpike;
+            if (t.MaxSpike > t.MinSpike)
             {
-                int half = (p.MaxSpike + 1) / 2;
-                spikeWant = half + rng.Next(0, p.MaxSpike - half + 1);
+                spikeWant = t.MinSpike + rng.Next(0, t.MaxSpike - t.MinSpike + 1);
             }
-            PlaceSpikesOnPath(level, topo, p, rng, place, spikeWant);
+            if (spikeWant > t.MaxSpike)
+            {
+                spikeWant = t.MaxSpike;
+            }
+            int need = spikeWant - place.Spike;
+            if (need > 0)
+            {
+                PlaceSpikesOnPath(level, topo, p, rng, place, need);
+            }
+        }
+        else if (place.Spike < t.MaxSpike && rng.Next(0, 100) < 50)
+        {
+            int extra = rng.Next(0, t.MaxSpike - place.Spike + 1);
+            if (extra > 0)
+            {
+                PlaceSpikesOnPath(level, topo, p, rng, place, extra);
+            }
         }
 
-        int pushBudget = p.MaxEnemy + p.MaxRock;
-        if (pushBudget > 0)
+        int pushHave = place.Enemy + place.Rock;
+        int pushMin = t.MinEnemy + t.MinRock;
+        int pushMax = t.MaxEnemy + t.MaxRock;
+        if (pushHave < pushMin)
         {
-            int pushWant = 1;
-            if (pushBudget >= 2)
+            int pushWant = pushMin;
+            if (pushMax > pushMin)
             {
-                int hi = pushBudget < 4 ? pushBudget : 4;
-                pushWant = 1 + rng.Next(0, hi);
+                pushWant = pushMin + rng.Next(0, pushMax - pushMin + 1);
             }
-            if (pushWant > pushBudget)
+            if (pushWant > pushMax)
             {
-                pushWant = pushBudget;
+                pushWant = pushMax;
             }
-            PlacePushablesOnPath(level, topo, p, rng, place, pushWant);
+            int need = pushWant - pushHave;
+            if (need > 0)
+            {
+                PlacePushablesOnPath(level, topo, p, rng, place, need);
+            }
+        }
+        else if (pushHave < pushMax && rng.Next(0, 100) < 45)
+        {
+            int extra = 1 + rng.Next(0, 2);
+            int room = pushMax - (place.Enemy + place.Rock);
+            if (extra > room)
+            {
+                extra = room;
+            }
+            if (extra > 0)
+            {
+                PlacePushablesOnPath(level, topo, p, rng, place, extra);
+            }
         }
 
         if (place.Door < 1)
@@ -676,9 +848,9 @@ public static class LevelBackwardGenerator
             error = "Compose needs a door.";
             return false;
         }
-        if (place.Spike < 1 && place.Enemy + place.Rock < 1)
+        if (place.Spike < t.MinSpike || place.Enemy < t.MinEnemy || place.Rock < t.MinRock)
         {
-            error = "Compose needs spikes or pushables on path.";
+            error = "Compose could not meet Min Enemy/Rock/Spike.";
             return false;
         }
 
@@ -844,11 +1016,12 @@ public static class LevelBackwardGenerator
     private static void PlacePushablesOnPath(
         LevelData level, Topology topo, LevelGenerateParams p, System.Random rng, PlacementState place, int want)
     {
+        LevelDifficultyTargets t = p.Targets;
         List<int> pool = new List<int>();
         for (int i = 0; i < topo.Shortest.Count; i++)
         {
             int cell = topo.Shortest[i];
-            if (!place.Used[cell] && HasPushSpace(topo, cell))
+            if (!place.Used[cell] && HasPushSpace(topo, place, cell))
             {
                 pool.Add(cell);
             }
@@ -858,7 +1031,7 @@ public static class LevelBackwardGenerator
             for (int i = 0; i < topo.Free.Count; i++)
             {
                 int cell = topo.Free[i];
-                if (!place.Used[cell] && HasPushSpace(topo, cell))
+                if (!place.Used[cell] && HasPushSpace(topo, place, cell))
                 {
                     pool.Add(cell);
                 }
@@ -868,14 +1041,14 @@ public static class LevelBackwardGenerator
         int placed = 0;
         for (int i = 0; i < pool.Count && placed < want; i++)
         {
-            bool preferEnemy = place.Enemy < p.MaxEnemy
-                && (place.Rock >= p.MaxRock || rng.Next(0, 2) == 0);
+            bool preferEnemy = place.Enemy < t.MaxEnemy
+                && (place.Rock >= t.MaxRock || rng.Next(0, 2) == 0);
             LevelObjectType type = preferEnemy ? LevelObjectType.Enemy : LevelObjectType.Rock;
-            if (type == LevelObjectType.Enemy && place.Enemy >= p.MaxEnemy)
+            if (type == LevelObjectType.Enemy && place.Enemy >= t.MaxEnemy)
             {
                 type = LevelObjectType.Rock;
             }
-            if (type == LevelObjectType.Rock && place.Rock >= p.MaxRock)
+            if (type == LevelObjectType.Rock && place.Rock >= t.MaxRock)
             {
                 type = LevelObjectType.Enemy;
             }
@@ -890,7 +1063,8 @@ public static class LevelBackwardGenerator
         LevelData level, Topology topo, LevelGenerateParams p, System.Random rng, PlacementState place, out string error)
     {
         error = null;
-        if (p.MaxEnemy < 1 && p.MaxRock < 1)
+        LevelDifficultyTargets t = p.Targets;
+        if (t.MaxEnemy < 1 && t.MaxRock < 1)
         {
             error = "Need MaxEnemy or MaxRock >= 1.";
             return false;
@@ -899,7 +1073,7 @@ public static class LevelBackwardGenerator
         for (int i = 0; i < topo.Shortest.Count; i++)
         {
             int cell = topo.Shortest[i];
-            if (HasPushSpace(topo, cell))
+            if (!place.Used[cell] && HasPushSpace(topo, place, cell))
             {
                 pool.Add(cell);
             }
@@ -911,20 +1085,21 @@ public static class LevelBackwardGenerator
         }
         Shuffle(pool, rng);
         int count = 1 + rng.Next(0, 2);
-        if (p.MaxEnemy + p.MaxRock < count)
+        int budget = (t.MaxEnemy - place.Enemy) + (t.MaxRock - place.Rock);
+        if (budget < count)
         {
-            count = p.MaxEnemy + p.MaxRock;
+            count = budget;
         }
         int placed = 0;
         for (int i = 0; i < pool.Count && placed < count; i++)
         {
-            bool preferEnemy = p.MaxEnemy > place.Enemy && (p.MaxRock <= place.Rock || rng.Next(0, 2) == 0);
+            bool preferEnemy = t.MaxEnemy > place.Enemy && (t.MaxRock <= place.Rock || rng.Next(0, 2) == 0);
             LevelObjectType type = preferEnemy ? LevelObjectType.Enemy : LevelObjectType.Rock;
-            if (type == LevelObjectType.Enemy && place.Enemy >= p.MaxEnemy)
+            if (type == LevelObjectType.Enemy && place.Enemy >= t.MaxEnemy)
             {
                 type = LevelObjectType.Rock;
             }
-            if (type == LevelObjectType.Rock && place.Rock >= p.MaxRock)
+            if (type == LevelObjectType.Rock && place.Rock >= t.MaxRock)
             {
                 type = LevelObjectType.Enemy;
             }
@@ -946,7 +1121,8 @@ public static class LevelBackwardGenerator
         LevelData level, Topology topo, LevelGenerateParams p, System.Random rng, PlacementState place, out string error)
     {
         error = null;
-        if (p.MaxEnemy < 1 && p.MaxRock < 1)
+        LevelDifficultyTargets t = p.Targets;
+        if (t.MaxEnemy < 1 && t.MaxRock < 1)
         {
             error = "Need MaxEnemy or MaxRock >= 1.";
             return false;
@@ -955,17 +1131,19 @@ public static class LevelBackwardGenerator
         for (int i = 0; i < topo.Side.Count; i++)
         {
             int cell = topo.Side[i];
-            if (IsAdjacentToAny(topo, cell, topo.Shortest))
+            if (!place.Used[cell] && IsAdjacentToAny(topo, cell, topo.Shortest))
             {
                 pool.Add(cell);
             }
         }
         if (pool.Count == 0)
         {
-            // Fallback: any free side cell.
             for (int i = 0; i < topo.Side.Count; i++)
             {
-                pool.Add(topo.Side[i]);
+                if (!place.Used[topo.Side[i]])
+                {
+                    pool.Add(topo.Side[i]);
+                }
             }
         }
         if (pool.Count == 0)
@@ -975,7 +1153,7 @@ public static class LevelBackwardGenerator
         }
         Shuffle(pool, rng);
         int want = 1 + rng.Next(0, 3);
-        int maxBlock = p.MaxEnemy + p.MaxRock;
+        int maxBlock = (t.MaxEnemy - place.Enemy) + (t.MaxRock - place.Rock);
         if (want > maxBlock)
         {
             want = maxBlock;
@@ -983,7 +1161,7 @@ public static class LevelBackwardGenerator
         int placed = 0;
         for (int i = 0; i < pool.Count && placed < want; i++)
         {
-            LevelObjectType type = (place.Rock < p.MaxRock && (place.Enemy >= p.MaxEnemy || rng.Next(0, 2) == 0))
+            LevelObjectType type = (place.Rock < t.MaxRock && (place.Enemy >= t.MaxEnemy || rng.Next(0, 2) == 0))
                 ? LevelObjectType.Rock
                 : LevelObjectType.Enemy;
             if (!TryPlaceExclusive(level, topo, place, pool[i], type, p))
@@ -1004,11 +1182,11 @@ public static class LevelBackwardGenerator
         LevelData level, Topology topo, LevelGenerateParams p, System.Random rng, PlacementState place, out string error)
     {
         error = null;
-        // Seal most side exits, leave at least one alternate open for multi-solution chance.
+        LevelDifficultyTargets t = p.Targets;
         List<int> pool = new List<int>();
         for (int i = 0; i < topo.Side.Count; i++)
         {
-            if (IsAdjacentToAny(topo, topo.Side[i], topo.Shortest))
+            if (!place.Used[topo.Side[i]] && IsAdjacentToAny(topo, topo.Side[i], topo.Shortest))
             {
                 pool.Add(topo.Side[i]);
             }
@@ -1019,7 +1197,6 @@ public static class LevelBackwardGenerator
             return false;
         }
         Shuffle(pool, rng);
-        // Leave first cell open as alternate branch.
         int open = pool[0];
         int placed = 0;
         for (int i = 1; i < pool.Count; i++)
@@ -1028,11 +1205,11 @@ public static class LevelBackwardGenerator
             {
                 continue;
             }
-            if (place.Enemy >= p.MaxEnemy && place.Rock >= p.MaxRock)
+            if (place.Enemy >= t.MaxEnemy && place.Rock >= t.MaxRock)
             {
                 break;
             }
-            LevelObjectType type = place.Rock < p.MaxRock ? LevelObjectType.Rock : LevelObjectType.Enemy;
+            LevelObjectType type = place.Rock < t.MaxRock ? LevelObjectType.Rock : LevelObjectType.Enemy;
             if (TryPlaceExclusive(level, topo, place, pool[i], type, p))
             {
                 placed++;
@@ -1050,7 +1227,8 @@ public static class LevelBackwardGenerator
         LevelData level, Topology topo, LevelGenerateParams p, System.Random rng, PlacementState place, out string error)
     {
         error = null;
-        if (p.MaxSpike < 1)
+        LevelDifficultyTargets t = p.Targets;
+        if (t.MaxSpike < 1)
         {
             error = "Need MaxSpike >= 1.";
             return false;
@@ -1058,7 +1236,7 @@ public static class LevelBackwardGenerator
         List<int> pool = new List<int>();
         for (int i = 0; i < topo.Side.Count; i++)
         {
-            if (IsAdjacentToAny(topo, topo.Side[i], topo.Shortest))
+            if (!place.Used[topo.Side[i]] && IsAdjacentToAny(topo, topo.Side[i], topo.Shortest))
             {
                 pool.Add(topo.Side[i]);
             }
@@ -1067,7 +1245,7 @@ public static class LevelBackwardGenerator
         {
             for (int i = 0; i < topo.Free.Count; i++)
             {
-                if (!IsOnList(topo.Shortest, topo.Free[i]))
+                if (!place.Used[topo.Free[i]] && !IsOnList(topo.Shortest, topo.Free[i]))
                 {
                     pool.Add(topo.Free[i]);
                 }
@@ -1079,10 +1257,11 @@ public static class LevelBackwardGenerator
             return false;
         }
         Shuffle(pool, rng);
-        int want = 1 + rng.Next(0, Mathf.Min(3, p.MaxSpike));
-        if (want > p.MaxSpike)
+        int room = t.MaxSpike - place.Spike;
+        int want = 1 + rng.Next(0, Mathf.Min(3, room));
+        if (want > room)
         {
-            want = p.MaxSpike;
+            want = room;
         }
         int placed = 0;
         for (int i = 0; i < pool.Count && placed < want; i++)
@@ -1170,7 +1349,8 @@ public static class LevelBackwardGenerator
         PlacementState place,
         PatternId main)
     {
-        if (main != PatternId.SpikeTax && place.Spike < p.MaxSpike && rng.Next(0, 100) < 40)
+        LevelDifficultyTargets t = p.Targets;
+        if (main != PatternId.SpikeTax && place.Spike < t.MaxSpike && rng.Next(0, 100) < 40)
         {
             List<int> pool = new List<int>();
             for (int i = 0; i < topo.Side.Count; i++)
@@ -1185,7 +1365,7 @@ public static class LevelBackwardGenerator
                 TryPlaceExclusive(level, topo, place, pool[rng.Next(0, pool.Count)], LevelObjectType.Spike, p);
             }
         }
-        if (main != PatternId.Blocker && (place.Rock < p.MaxRock || place.Enemy < p.MaxEnemy) && rng.Next(0, 100) < 35)
+        if (main != PatternId.Blocker && (place.Rock < t.MaxRock || place.Enemy < t.MaxEnemy) && rng.Next(0, 100) < 35)
         {
             List<int> pool = new List<int>();
             for (int i = 0; i < topo.Side.Count; i++)
@@ -1197,7 +1377,7 @@ public static class LevelBackwardGenerator
             }
             if (pool.Count > 0)
             {
-                LevelObjectType type = place.Rock < p.MaxRock ? LevelObjectType.Rock : LevelObjectType.Enemy;
+                LevelObjectType type = place.Rock < t.MaxRock ? LevelObjectType.Rock : LevelObjectType.Enemy;
                 TryPlaceExclusive(level, topo, place, pool[rng.Next(0, pool.Count)], type, p);
             }
         }
@@ -1212,6 +1392,7 @@ public static class LevelBackwardGenerator
         LevelObjectType type,
         LevelGenerateParams p)
     {
+        LevelDifficultyTargets t = p.Targets;
         if (cell < 0 || cell >= place.Used.Length || place.Used[cell])
         {
             return false;
@@ -1220,32 +1401,62 @@ public static class LevelBackwardGenerator
         {
             return false;
         }
-        if (type == LevelObjectType.Enemy && place.Enemy >= p.MaxEnemy)
+        if (!topo.Walkable[cell])
         {
             return false;
         }
-        if (type == LevelObjectType.Rock && place.Rock >= p.MaxRock)
+        if (type == LevelObjectType.Enemy && place.Enemy >= t.MaxEnemy)
         {
             return false;
         }
-        if (type == LevelObjectType.Spike && place.Spike >= p.MaxSpike)
+        if (type == LevelObjectType.Rock && place.Rock >= t.MaxRock)
         {
             return false;
         }
+        if (type == LevelObjectType.Spike && place.Spike >= t.MaxSpike)
+        {
+            return false;
+        }
+        if (type == LevelObjectType.Enemy || type == LevelObjectType.Rock)
+        {
+            if (!HasPushSpace(topo, place, cell) && !IsAdjacentToAny(topo, cell, topo.Shortest)
+                && !IsOnList(topo.Shortest, cell) && !IsOnList(topo.Choke, cell))
+            {
+                return false;
+            }
+            if (HasAdjacentPushable(topo, place, cell) && !HasIndependentPushSpace(topo, place, cell))
+            {
+                return false;
+            }
+        }
+
+        int x = cell % topo.Width;
+        int y = cell / topo.Width;
+        LevelObjectData added = new LevelObjectData(level.AllocateObjectId(), type, x, y);
+        level.Objects.Add(added);
+        level.SyncDerivedFields();
+        if (!LevelAnalyzer.HasGameplayImpact(level, added))
+        {
+            level.Objects.RemoveAt(level.Objects.Count - 1);
+            level.SyncDerivedFields();
+            return false;
+        }
+
         place.Used[cell] = true;
         if (type == LevelObjectType.Enemy)
         {
             place.Enemy++;
+            place.Pushable[cell] = true;
         }
         else if (type == LevelObjectType.Rock)
         {
             place.Rock++;
+            place.Pushable[cell] = true;
         }
         else if (type == LevelObjectType.Spike)
         {
             place.Spike++;
         }
-        AddObj(level, type, cell, topo.Width);
         return true;
     }
 
@@ -1256,23 +1467,58 @@ public static class LevelBackwardGenerator
         level.Objects.Add(new LevelObjectData(level.AllocateObjectId(), type, x, y));
     }
 
-    private static bool HasPushSpace(Topology topo, int cell)
+    private static bool HasAdjacentPushable(Topology topo, PlacementState place, int cell)
     {
         int x;
         int y;
         topo.Logic.FromIndex(cell, out x, out y);
-        return IsOpenFloor(topo, x + 1, y) || IsOpenFloor(topo, x - 1, y)
-            || IsOpenFloor(topo, x, y + 1) || IsOpenFloor(topo, x, y - 1);
+        return IsPushableCell(place, SafeIndex(topo, x + 1, y))
+            || IsPushableCell(place, SafeIndex(topo, x - 1, y))
+            || IsPushableCell(place, SafeIndex(topo, x, y + 1))
+            || IsPushableCell(place, SafeIndex(topo, x, y - 1));
     }
 
-    private static bool IsOpenFloor(Topology topo, int x, int y)
+    private static bool IsPushableCell(PlacementState place, int cell)
+    {
+        if (cell < 0 || cell >= place.Pushable.Length)
+        {
+            return false;
+        }
+        return place.Pushable[cell];
+    }
+
+    private static bool HasPushSpace(Topology topo, PlacementState place, int cell)
+    {
+        return HasIndependentPushSpace(topo, place, cell);
+    }
+
+    private static bool HasIndependentPushSpace(Topology topo, PlacementState place, int cell)
+    {
+        int x;
+        int y;
+        topo.Logic.FromIndex(cell, out x, out y);
+        return IsOpenPushDest(topo, place, x + 1, y)
+            || IsOpenPushDest(topo, place, x - 1, y)
+            || IsOpenPushDest(topo, place, x, y + 1)
+            || IsOpenPushDest(topo, place, x, y - 1);
+    }
+
+    private static bool IsOpenPushDest(Topology topo, PlacementState place, int x, int y)
     {
         if (!topo.Logic.InBounds(x, y))
         {
             return false;
         }
         int i = topo.Logic.ToIndex(x, y);
-        return topo.Walkable[i];
+        if (!topo.Walkable[i])
+        {
+            return false;
+        }
+        if (place.Pushable[i])
+        {
+            return false;
+        }
+        return true;
     }
 
     private static bool IsAdjacentToAny(Topology topo, int cell, List<int> list)

@@ -43,19 +43,25 @@ public sealed class LevelEditorWindow : EditorWindow
     private int genWidth = 8;
     private int genHeight = 8;
     private bool genFreeGen = true;
-    private int genTargetSolutions = 1;
-    private int genMoveLimit = 10;
-    private int genMoveLimitSlack = 2;
-    private int genMinPathExtra = 2;
-    private int genSolutionCountCap = 48;
     private int genMaxAttempts = 120;
     private int genSeed;
+    private int genMinEnemy;
     private int genMaxEnemy = 3;
+    private int genMinRock;
     private int genMaxRock = 4;
+    private int genMinSpike;
     private int genMaxSpike = 8;
+    private int genMinPathExtra = 2;
+    private int genMaxPathExtra = 64;
+    private int genMinSolutions = 1;
+    private int genMaxSolutions = 48;
+    private int genMinMoveSlack;
+    private int genMaxMoveSlack = 4;
+    private int genMinDependencyDepth = 1;
     private int genStateLimit = 60000;
     private int genTimeLimitMs = 120;
     private LevelGenerateResult lastGenerateResult;
+    private const string PrefLastLevelDir = "LevelEditor.LastLevelDataDir";
 
     [MenuItem("Tools/Level Editor")]
     public static void Open()
@@ -264,9 +270,8 @@ public sealed class LevelEditorWindow : EditorWindow
     {
         GUILayout.Label("Generator (GD tool)", EditorStyles.boldLabel);
         EditorGUILayout.HelpBox(
-            "1) Draw raw map only: Floor / Wall / PlayerStart / Goal.\n"
-            + "2) Generate → places Key/Door/Spike/Enemy/Rock on critical path.\n"
-            + "3) Auto MoveLimit = minMoves + slack. Difficulty is output only.",
+            "Uses Level MoveLimit (never raised). GD objects are kept; only empty cells are filled.\n"
+            + "Difficulty = MoveLimit + Analyzer Min/Max ranges (not object count).",
             MessageType.Info);
 
         EditorGUI.BeginChangeCheck();
@@ -279,20 +284,26 @@ public sealed class LevelEditorWindow : EditorWindow
             genHeight = levelData.Height;
         }
 
+        if (levelData != null)
+        {
+            GUILayout.Label("MoveLimit (fixed): " + levelData.MoveLimit);
+        }
+
         genFreeGen = EditorGUILayout.Toggle("FreeGen (GD)", genFreeGen);
-        if (genFreeGen)
-        {
-            genMoveLimitSlack = EditorGUILayout.IntField("MoveLimit Slack", genMoveLimitSlack);
-            genMinPathExtra = EditorGUILayout.IntField("Min Path Extra", genMinPathExtra);
-            genSolutionCountCap = EditorGUILayout.IntField("Solution Cap (speed)", genSolutionCountCap);
-        }
-        else
-        {
-            genTargetSolutions = EditorGUILayout.IntField("Target Solutions", genTargetSolutions);
-            genMoveLimit = EditorGUILayout.IntField("MoveLimit", genMoveLimit);
-        }
+        GUILayout.Label("Analyzer Ranges", EditorStyles.boldLabel);
+        genMinPathExtra = EditorGUILayout.IntField("Min Path Extra", genMinPathExtra);
+        genMaxPathExtra = EditorGUILayout.IntField("Max Path Extra", genMaxPathExtra);
+        genMinSolutions = EditorGUILayout.IntField("Min Solutions", genMinSolutions);
+        genMaxSolutions = EditorGUILayout.IntField("Max Solutions", genMaxSolutions);
+        genMinMoveSlack = EditorGUILayout.IntField("Min MoveSlack", genMinMoveSlack);
+        genMaxMoveSlack = EditorGUILayout.IntField("Max MoveSlack", genMaxMoveSlack);
+        genMinDependencyDepth = EditorGUILayout.IntField("Min Dependency Depth", genMinDependencyDepth);
+        GUILayout.Label("Placement Caps (Min/Max)", EditorStyles.boldLabel);
+        genMinEnemy = EditorGUILayout.IntField("Min Enemy", genMinEnemy);
         genMaxEnemy = EditorGUILayout.IntField("Max Enemy", genMaxEnemy);
+        genMinRock = EditorGUILayout.IntField("Min Rock", genMinRock);
         genMaxRock = EditorGUILayout.IntField("Max Rock", genMaxRock);
+        genMinSpike = EditorGUILayout.IntField("Min Spike", genMinSpike);
         genMaxSpike = EditorGUILayout.IntField("Max Spike", genMaxSpike);
         genMaxAttempts = EditorGUILayout.IntField("MaxAttempts", genMaxAttempts);
         genSeed = EditorGUILayout.IntField("Seed (0=random)", genSeed);
@@ -1106,11 +1117,11 @@ public sealed class LevelEditorWindow : EditorWindow
         assetPath = path;
         genWidth = levelData.Width;
         genHeight = levelData.Height;
-        genMoveLimit = levelData.MoveLimit;
         undoStack.Clear();
         redoStack.Clear();
         analysis = null;
         statusMessage = "Created " + path;
+        RememberLevelDir(path);
     }
 
     private void GenerateLevel()
@@ -1131,18 +1142,26 @@ public sealed class LevelEditorWindow : EditorWindow
         genParams.Width = genWidth;
         genParams.Height = genHeight;
         genParams.FreeGen = genFreeGen;
-        genParams.TargetSolutions = genTargetSolutions;
-        genParams.MoveLimit = genMoveLimit;
-        genParams.MoveLimitSlack = genMoveLimitSlack;
-        genParams.MinPathExtra = genMinPathExtra;
-        genParams.SolutionCountCap = genSolutionCountCap;
+        genParams.MoveLimit = levelData.MoveLimit;
         genParams.MaxAttempts = genMaxAttempts;
         genParams.Seed = genSeed;
-        genParams.MaxEnemy = genMaxEnemy;
-        genParams.MaxRock = genMaxRock;
-        genParams.MaxSpike = genMaxSpike;
         genParams.StateLimit = genStateLimit;
         genParams.TimeLimitMs = genTimeLimitMs;
+        LevelDifficultyTargets targets = new LevelDifficultyTargets();
+        targets.MinEnemy = genMinEnemy;
+        targets.MaxEnemy = genMaxEnemy;
+        targets.MinRock = genMinRock;
+        targets.MaxRock = genMaxRock;
+        targets.MinSpike = genMinSpike;
+        targets.MaxSpike = genMaxSpike;
+        targets.MinPathExtra = genMinPathExtra;
+        targets.MaxPathExtra = genMaxPathExtra;
+        targets.MinSolutions = genMinSolutions;
+        targets.MaxSolutions = genMaxSolutions;
+        targets.MinMoveSlack = genMinMoveSlack;
+        targets.MaxMoveSlack = genMaxMoveSlack;
+        targets.MinDependencyDepth = genMinDependencyDepth;
+        genParams.Targets = targets;
 
         EditorUtility.DisplayProgressBar("Generate Level", "Pattern place → cheap check → solve...", 0.5f);
         LevelGenerateResult generated;
@@ -1209,6 +1228,7 @@ public sealed class LevelEditorWindow : EditorWindow
                 AssetDatabase.CreateAsset(levelData, path);
             }
             assetPath = path;
+            RememberLevelDir(path);
         }
         EditorUtility.SetDirty(levelData);
         AssetDatabase.SaveAssets();
@@ -1217,11 +1237,17 @@ public sealed class LevelEditorWindow : EditorWindow
 
     private void LoadLevel()
     {
-        string path = EditorUtility.OpenFilePanel("Load LevelData", Application.dataPath, "asset");
+        string startDir = EditorPrefs.GetString(PrefLastLevelDir, Application.dataPath);
+        if (string.IsNullOrEmpty(startDir) || !System.IO.Directory.Exists(startDir))
+        {
+            startDir = Application.dataPath;
+        }
+        string path = EditorUtility.OpenFilePanel("Load LevelData", startDir, "asset");
         if (string.IsNullOrEmpty(path))
         {
             return;
         }
+        RememberAbsoluteDir(path);
         if (path.StartsWith(Application.dataPath))
         {
             path = "Assets" + path.Substring(Application.dataPath.Length);
@@ -1236,13 +1262,39 @@ public sealed class LevelEditorWindow : EditorWindow
         assetPath = path;
         genWidth = levelData.Width;
         genHeight = levelData.Height;
-        genMoveLimit = levelData.MoveLimit;
         undoStack.Clear();
         redoStack.Clear();
         analysis = null;
         shownSolution.Clear();
         selectedSolutionIndex = 0;
         statusMessage = "Loaded " + path;
+    }
+
+    private static void RememberLevelDir(string assetOrAbsolutePath)
+    {
+        if (string.IsNullOrEmpty(assetOrAbsolutePath))
+        {
+            return;
+        }
+        string absolute = assetOrAbsolutePath;
+        if (assetOrAbsolutePath.StartsWith("Assets"))
+        {
+            absolute = Application.dataPath + assetOrAbsolutePath.Substring("Assets".Length);
+        }
+        RememberAbsoluteDir(absolute);
+    }
+
+    private static void RememberAbsoluteDir(string absolutePath)
+    {
+        if (string.IsNullOrEmpty(absolutePath))
+        {
+            return;
+        }
+        string dir = System.IO.Path.GetDirectoryName(absolutePath);
+        if (!string.IsNullOrEmpty(dir))
+        {
+            EditorPrefs.SetString(PrefLastLevelDir, dir);
+        }
     }
 
     private void PushUndo()
