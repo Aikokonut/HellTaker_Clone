@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::LevelData
   width: 10
   height: 12
-  moveLimit: 32
+  moveLimit: 28
   playerStart: {x: 8, y: 8}
   goal: {x: 7, y: 10}
   objects:
@@ -330,34 +330,14 @@ MonoBehaviour:
     type: 1
     x: 6
     y: 9
-  - id: 379
-    type: 0
-    x: 4
-    y: 8
   - id: 380
     type: 0
     x: 5
     y: 8
-  - id: 381
-    type: 0
-    x: 5
-    y: 7
-  - id: 382
-    type: 0
-    x: 5
-    y: 6
   - id: 383
     type: 0
     x: 5
     y: 5
-  - id: 384
-    type: 0
-    x: 6
-    y: 6
-  - id: 385
-    type: 0
-    x: 7
-    y: 6
   - id: 386
     type: 0
     x: 6
@@ -374,16 +354,36 @@ MonoBehaviour:
     type: 0
     x: 3
     y: 7
-  - id: 390
-    type: 5
+  - id: 428
+    type: 0
+    x: 4
+    y: 8
+  - id: 429
+    type: 0
     x: 5
-    y: 5
-  - id: 391
-    type: 4
+    y: 7
+  - id: 430
+    type: 0
     x: 5
     y: 6
-  - id: 392
+  - id: 431
+    type: 0
+    x: 6
+    y: 6
+  - id: 432
+    type: 0
+    x: 7
+    y: 6
+  - id: 448
+    type: 9
+    x: 7
+    y: 8
+  - id: 449
     type: 4
-    x: 5
+    x: 2
     y: 4
-  nextObjectId: 393
+  - id: 450
+    type: 5
+    x: 7
+    y: 5
+  nextObjectId: 451

@@ -362,9 +362,8 @@ public sealed class LevelEditorWindow : EditorWindow
     {
         GUILayout.Label("Generator (Path-First)", EditorStyles.boldLabel);
         EditorGUILayout.HelpBox(
-            "Chọn route Start→Zones→Goal, rồi gắn Rock/Enemy/Spike LÊN đường đi.\n"
-            + "Mỗi object phải tăng cost hoặc xuất hiện Push/Kick/Spike trên optimal path.\n"
-            + "Base map hẹp (choke) + count thấp = giống Helltaker hơn.",
+            "Trap/bait = polish. Mọi E/R/S phải dùng trên optimal. Attempts ≤60.\n"
+            + "MaxTarget≤2. Object thừa / không tăng cost → reject.",
             MessageType.Info);
 
         EditorGUI.BeginChangeCheck();
@@ -424,17 +423,24 @@ public sealed class LevelEditorWindow : EditorWindow
         GUILayout.Label("Budget", EditorStyles.boldLabel);
         genCostSlack = EditorGUILayout.IntField("Cost Slack", genCostSlack);
         EditorGUILayout.HelpBox(
-            "Count = mục tiêu tối đa; mỗi object phải +OptimalCost (Rock delta≤3).\n"
-            + "Spike đặt trước Rock. Budget = CostSlack (không softCap chặt).\n"
-            + "Muốn đủ 3 Spike: CostSlack ≥ Spike + Rock budget (vd Slack 10–14).",
+            "E/R/S đã vẽ trên map được GIỮ. Count = tổng cuối (phải >= số sẵn có).\n"
+            + "Max Target Solutions ≤3 (1 = khó nhất). Spike cần ≥ nửa số nằm trên optimal path.",
             MessageType.None);
-        genMaxCandidates = EditorGUILayout.IntField("Keep Candidates", genMaxCandidates);
-        genMaxTargetSolutions = EditorGUILayout.IntField("Max Target Solutions", genMaxTargetSolutions);
+        genMaxCandidates = EditorGUILayout.IntField("Max Unique Candidates", genMaxCandidates);
+        if (genMaxCandidates < 1) genMaxCandidates = 1;
         EditorGUILayout.HelpBox(
-            "Max Target Solutions = số lời giải tối ưu tối đa (1 = unique, khó).\n"
-            + "Gen reject candidate nếu SolutionCount > giá trị này.",
+            "Chỉ giữ layout khác nhau. Có bao nhiêu unique thì hiện bấy nhiêu (≤ max).",
+            MessageType.None);
+        genMaxTargetSolutions = EditorGUILayout.IntField("Max Target Solutions", genMaxTargetSolutions);
+        if (genMaxTargetSolutions > 2) genMaxTargetSolutions = 2;
+        if (genMaxTargetSolutions < 1) genMaxTargetSolutions = 1;
+        EditorGUILayout.HelpBox(
+            "Max Target Solutions = số lời giải tối ưu tối đa (1 = unique).\n"
+            + "Candidate bị reject nếu sols > giá trị này. Thêm Rock/Enemy trên choke để cắt nhánh.",
             MessageType.None);
         genMaxAttempts = EditorGUILayout.IntField("Max Attempts", genMaxAttempts);
+        if (genMaxAttempts > 60) genMaxAttempts = 60;
+        if (genMaxAttempts < 1) genMaxAttempts = 1;
         genSeed = EditorGUILayout.IntField("Seed (0=random)", genSeed);
         GUILayout.Label("Performance", EditorStyles.boldLabel);
         genStateLimit = EditorGUILayout.IntField("StateLimit", genStateLimit);

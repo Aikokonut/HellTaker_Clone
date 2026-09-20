@@ -123,15 +123,15 @@ public static class LevelAnalyzer
         {
             result.RecommendedMaxTargetSolutions = 1;
         }
-        if (result.RecommendedMaxTargetSolutions > 8)
+        if (result.RecommendedMaxTargetSolutions > 2)
         {
-            result.RecommendedMaxTargetSolutions = 8;
+            result.RecommendedMaxTargetSolutions = 2;
         }
 
         int objects = result.EnemyCount + result.RockCount + result.SpikeCount;
-        result.RecommendedAttempts = 40 + objects * 25 + result.CostSlack * 5;
-        if (result.RecommendedAttempts < 60) result.RecommendedAttempts = 60;
-        if (result.RecommendedAttempts > 300) result.RecommendedAttempts = 300;
+        result.RecommendedAttempts = 24 + objects * 8 + result.CostSlack * 2;
+        if (result.RecommendedAttempts < 24) result.RecommendedAttempts = 24;
+        if (result.RecommendedAttempts > 60) result.RecommendedAttempts = 60;
 
         result.Success = true;
         result.Message = "BaseCost=" + result.BaseCost
