@@ -123,10 +123,6 @@ public static class LevelAnalyzer
         {
             result.RecommendedMaxTargetSolutions = 1;
         }
-        if (result.RecommendedMaxTargetSolutions > 2)
-        {
-            result.RecommendedMaxTargetSolutions = 2;
-        }
 
         int objects = result.EnemyCount + result.RockCount + result.SpikeCount;
         result.RecommendedAttempts = 24 + objects * 8 + result.CostSlack * 2;

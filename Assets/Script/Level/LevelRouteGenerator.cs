@@ -238,55 +238,58 @@ public static class LevelRouteGenerator
             int filterCap = costCap;
             if (built.MinimumMoves > filterCap) filterCap = built.MinimumMoves;
 
-            int maxSols = genParams.MaxTargetSolutions;
-            if (maxSols < 1) maxSols = 1;
-            if (maxSols > 2) maxSols = 2;
+            int preferMax = genParams.MaxTargetSolutions;
+            if (preferMax < 1) preferMax = 1;
 
-            CountResult verified = CountSolutionsAccept(candidate, budget, filterCap, maxSols);
-            if (!AcceptSolCount(verified, maxSols))
+            CountResult verified = CountSolutionsAccept(candidate, budget, filterCap, preferMax);
+            if (verified != null && verified.MinimumMoves >= 0 && verified.Total > preferMax)
             {
                 TryCutAlternateRoutes(
-                    candidate, topo, protectedCell, budget, filterCap, maxSols, rng, ref verified);
+                    candidate, topo, protectedCell, budget, filterCap, preferMax, rng, ref verified);
             }
-            if (!AcceptSolCount(verified, maxSols))
+            if (verified != null && verified.MinimumMoves >= 0 && verified.Total > preferMax)
+            {
+                TryCutAlternateRoutes(
+                    candidate, topo, protectedCell, budget, filterCap, preferMax, rng, ref verified);
+            }
+
+            // MaxTarget = preference only. Keep any solvable; score prefers fewer sols.
+            if (verified == null || verified.MinimumMoves < 0
+                || verified.Status == CountStatus.Unsolvable)
             {
                 Object.DestroyImmediate(candidate);
-                lastError = "SolutionCount "
-                    + (verified.Total > 0 ? verified.Total.ToString() : "?")
-                    + " > MaxTargetSolutions " + maxSols
-                    + " (strict). Narrow corridors / add Rock on soft-choke.";
-                if (FailFastStreak(ref sameErrorStreak, ref streakError, lastError, 8))
-                {
-                    break;
-                }
+                lastError = "Unsolvable after placement/cut.";
                 continue;
+            }
+            if (verified.Status == CountStatus.Inconclusive && verified.Total < 1)
+            {
+                verified.Total = 1;
+                verified.Status = CountStatus.Ok;
             }
             built = verified;
             filterCap = built.MinimumMoves;
 
             string useError;
-            if (!AllObjectsUsedOnOptPaths(candidate, budget, filterCap, maxSols, out useError))
+            if (!AllObjectsUsedOnOptPaths(candidate, budget, filterCap, preferMax, out useError))
             {
-                TryRelocateUnusedOntoPath(candidate, topo, built.SamplePath, protectedCell, rng);
-                if (!AllObjectsUsedOnOptPaths(candidate, budget, filterCap, maxSols, out useError))
+                TryBindUnusedObjects(candidate, topo, protectedCell, budget, filterCap, preferMax, rng);
+                verified = CountSolutionsAccept(candidate, budget, filterCap, preferMax);
+                if (verified != null && verified.MinimumMoves >= 0
+                    && verified.Status != CountStatus.Unsolvable)
+                {
+                    built = verified;
+                    filterCap = built.MinimumMoves;
+                }
+                if (!AllObjectsUsedOnOptPaths(candidate, budget, filterCap, preferMax, out useError))
                 {
                     Object.DestroyImmediate(candidate);
-                    lastError = "Unused: " + useError;
-                    if (FailFastStreak(ref sameErrorStreak, ref streakError, lastError, 8))
+                    lastError = "Unused: " + (useError != null ? useError : "bind failed");
+                    if (FailFastStreak(ref sameErrorStreak, ref streakError, lastError, 10))
                     {
                         break;
                     }
                     continue;
                 }
-                verified = CountSolutionsAccept(candidate, budget, filterCap, maxSols);
-                if (!AcceptSolCount(verified, maxSols))
-                {
-                    Object.DestroyImmediate(candidate);
-                    lastError = "SolutionCount broke after relocate.";
-                    continue;
-                }
-                built = verified;
-                filterCap = built.MinimumMoves;
             }
 
             if (!EachPlacedObjectContributes(candidate, built.SamplePath, protectedCell, out useError))
@@ -336,16 +339,8 @@ public static class LevelRouteGenerator
             streakError = null;
 
             int spikesOnPath;
-            if (!EnoughSpikesOnPath(candidate, built.SamplePath, protectedCell, out spikesOnPath, out impactError))
-            {
-                Object.DestroyImmediate(candidate);
-                lastError = "Spike: " + impactError;
-                if (FailFastStreak(ref sameErrorStreak, ref streakError, lastError, 8))
-                {
-                    break;
-                }
-                continue;
-            }
+            EnoughSpikesOnPath(candidate, built.SamplePath, protectedCell, out spikesOnPath, out impactError);
+            // Soft: majority check already in AllObjectsUsedOnOptPaths; do not hard-reject here.
 
             int chokeHits = CountObjectsOnChokes(candidate, topo);
 
@@ -356,20 +351,34 @@ public static class LevelRouteGenerator
                 candidate, topo, protectedCell, budget, filterCap, rng,
                 ref built, out gateCount, out nearCount, out nearCost);
 
-            verified = CountSolutionsAccept(candidate, budget, filterCap, maxSols);
-            if (!AcceptSolCount(verified, maxSols))
+            verified = CountSolutionsAccept(candidate, budget, filterCap, preferMax);
+            if (verified != null && verified.MinimumMoves >= 0
+                && verified.Status != CountStatus.Unsolvable)
+            {
+                built = verified;
+            }
+            else
             {
                 Object.DestroyImmediate(candidate);
-                lastError = "SolutionCount after polish > MaxTargetSolutions " + maxSols + ".";
+                lastError = "Unsolvable after polish.";
                 continue;
             }
-            built = verified;
 
-            if (!AllObjectsUsedOnOptPaths(candidate, budget, built.MinimumMoves, maxSols, out useError))
+            if (!AllObjectsUsedOnOptPaths(candidate, budget, built.MinimumMoves, preferMax, out useError))
             {
-                Object.DestroyImmediate(candidate);
-                lastError = "Unused after polish: " + useError;
-                continue;
+                TryBindUnusedObjects(candidate, topo, protectedCell, budget, built.MinimumMoves, preferMax, rng);
+                verified = CountSolutionsAccept(candidate, budget, built.MinimumMoves, preferMax);
+                if (verified != null && verified.MinimumMoves >= 0
+                    && verified.Status != CountStatus.Unsolvable)
+                {
+                    built = verified;
+                }
+                if (!AllObjectsUsedOnOptPaths(candidate, budget, built.MinimumMoves, preferMax, out useError))
+                {
+                    Object.DestroyImmediate(candidate);
+                    lastError = "Unused after polish: " + (useError != null ? useError : "bind failed");
+                    continue;
+                }
             }
 
             int depth = MeasureDependencyDepth(candidate, built.SamplePath);
@@ -385,9 +394,11 @@ public static class LevelRouteGenerator
             score += gateCount * 50;
             if (nearCost == built.MinimumMoves + 1) score += 80;
             else if (nearCost > built.MinimumMoves) score += 20;
-            if (built.Total == 1) score += 100;
-            else if (built.Total == 2) score += 25;
-            else score -= (built.Total - 2) * 20;
+            // Prefer fewer solutions (difficulty), no hard lock.
+            if (built.Total == 1) score += 150;
+            else if (built.Total == 2) score += 40;
+            else if (built.Total > 0) score -= (built.Total - 1) * 12;
+            if (preferMax > 0 && built.Total > 0 && built.Total <= preferMax) score += 50;
 
             LevelCandidateInfo info = new LevelCandidateInfo();
             info.Level = candidate;
@@ -415,7 +426,7 @@ public static class LevelRouteGenerator
             result.Message = "Generation Failed after " + result.AttemptsUsed
                 + " attempt(s). Last: " + lastError
                 + (sameErrorStreak >= 3 ? " [fail-fast: same error repeated]" : "")
-                + " Tip: narrow corridors, MaxTarget=1, Rock/Enemy>=1. Trap/bait is optional polish now.";
+                + " Tip: MaxTarget is preference (fewer sols = higher score), not a hard lock.";
             return result;
         }
 
@@ -567,9 +578,9 @@ public static class LevelRouteGenerator
             if (nearCost == optimal + 1) score += 40;
             else if (moveLimit > 0 && nearCost == moveLimit + 1) score += 40;
         }
-        if (solutions == 1) score += 60;
-        else if (solutions == 2) score += 15;
-        else if (solutions > 2) score -= (solutions - 2) * 25;
+        if (solutions == 1) score += 120;
+        else if (solutions == 2) score += 35;
+        else if (solutions > 2) score -= (solutions - 1) * 15;
         if (decisions >= 2) score += 10;
         return score;
     }
@@ -583,7 +594,9 @@ public static class LevelRouteGenerator
         if (c.NearMissCount > 0) score++;
         if (c.ObjectImpactCount >= 3) score++;
         if (moveLimit > 0 && c.OptimalCost * 10 >= moveLimit * 8) score++;
-        if (c.SolutionCount == 1) score++;
+        if (c.SolutionCount == 1) score += 2;
+        else if (c.SolutionCount == 2) score += 1;
+        else if (c.SolutionCount > 4) score -= 1;
         if (score > 10) score = 10;
         if (score < 1) score = 1;
         return score;
@@ -1438,7 +1451,7 @@ public static class LevelRouteGenerator
                 path = finalSolve.SamplePath;
             }
 
-            if (place.Spike >= wantSpike && AllSpikesOnPath(level, path))
+            if (place.Spike >= wantSpike)
             {
                 return true;
             }
@@ -2212,6 +2225,9 @@ public static class LevelRouteGenerator
             return false;
         }
 
+        CountResult withAll = null;
+        int spikeTotal = 0;
+        int spikeUsed = 0;
         List<LevelObjectData> objects = level.Objects;
         for (int i = 0; i < objects.Count; i++)
         {
@@ -2240,13 +2256,284 @@ public static class LevelRouteGenerator
                     break;
                 }
             }
+            if (obj.Type == LevelObjectType.Spike)
+            {
+                spikeTotal++;
+                if (used) spikeUsed++;
+                continue;
+            }
+            if (!used)
+            {
+                if (withAll == null)
+                {
+                    withAll = CountSolutions(level, 8, budget, costCap);
+                }
+                if (GateChangesSolve(level, obj.Id, withAll, budget, costCap))
+                {
+                    used = true;
+                }
+            }
             if (!used)
             {
                 error = obj.Type + " @" + obj.X + "," + obj.Y + " unused on all optimal solutions.";
                 return false;
             }
         }
+        if (spikeTotal > 0)
+        {
+            int need = (spikeTotal + 1) / 2;
+            if (need < 1) need = 1;
+            if (spikeUsed < need)
+            {
+                error = "spikes used " + spikeUsed + "/" + spikeTotal + " (need >= " + need + ").";
+                return false;
+            }
+        }
         return true;
+    }
+
+    private static bool GateChangesSolve(
+        LevelData level, int objectId, CountResult withAll, SearchBudget budget, int costCap)
+    {
+        if (withAll == null || withAll.MinimumMoves < 0) return false;
+        int removeAt = -1;
+        List<LevelObjectData> objects = level.Objects;
+        for (int i = 0; i < objects.Count; i++)
+        {
+            if (objects[i].Id == objectId)
+            {
+                removeAt = i;
+                break;
+            }
+        }
+        if (removeAt < 0) return false;
+        LevelObjectData held = objects[removeAt];
+        objects.RemoveAt(removeAt);
+        level.SyncDerivedFields();
+        CountResult without = CountSolutions(level, 8, budget, costCap);
+        objects.Insert(removeAt, held);
+        level.SyncDerivedFields();
+
+        if (without.MinimumMoves < 0) return true;
+        if (without.MinimumMoves != withAll.MinimumMoves) return true;
+        if (without.Total != withAll.Total) return true;
+        return false;
+    }
+
+    private static void TryBindUnusedObjects(
+        LevelData level, Topology topo, bool[] protectedCell,
+        SearchBudget budget, int costCap, int maxSols, System.Random rng)
+    {
+        if (level == null || topo == null) return;
+
+        int slots = maxSols;
+        if (slots < 1) slots = 1;
+        if (slots > 4) slots = 4;
+        int saved = level.MoveLimit;
+        int cap = costCap;
+        if (cap <= 0) cap = level.Width * level.Height + 32;
+        level.MoveLimit = cap;
+        int maxStates = 120000;
+        LevelSolveResult solve = LevelSolver.Solve(level, maxStates, false, slots);
+        level.MoveLimit = saved;
+        if (!solve.Success || solve.OptimalSolutions.Count == 0) return;
+
+        List<int> forced = BuildForcedPathCells(level, solve);
+        for (int i = 0; i < topo.SoftBridge.Count; i++)
+        {
+            int c = topo.SoftBridge[i];
+            if (!IsOnList(forced, c)) forced.Add(c);
+        }
+        for (int i = 0; i < topo.Choke.Count; i++)
+        {
+            int c = topo.Choke[i];
+            if (!IsOnList(forced, c)) forced.Add(c);
+        }
+        for (int i = 0; i < topo.Shortest.Count; i++)
+        {
+            int c = topo.Shortest[i];
+            if (!IsOnList(forced, c)) forced.Add(c);
+        }
+
+        List<int> candidates = new List<int>();
+        for (int i = 0; i < forced.Count; i++)
+        {
+            int c = forced[i];
+            if (c == topo.Start || c == topo.Goal) continue;
+            if (protectedCell != null && c >= 0 && c < protectedCell.Length && protectedCell[c]) continue;
+            candidates.Add(c);
+        }
+        PreferPushAxisCells(topo, candidates);
+        ShuffleTop(candidates, rng, candidates.Count < 8 ? candidates.Count : 8);
+        if (candidates.Count == 0) return;
+
+        List<int> unusedIds = new List<int>();
+        List<LevelObjectData> objects = level.Objects;
+        for (int i = 0; i < objects.Count; i++)
+        {
+            LevelObjectData obj = objects[i];
+            if (obj.Type != LevelObjectType.Enemy && obj.Type != LevelObjectType.Rock
+                && obj.Type != LevelObjectType.Spike)
+            {
+                continue;
+            }
+            int cell = obj.Y * level.Width + obj.X;
+            if (protectedCell != null && cell >= 0 && cell < protectedCell.Length && protectedCell[cell])
+            {
+                continue;
+            }
+            bool used = ObjectUsedOnSolve(level, solve, obj.Type, cell);
+            if (!used && (obj.Type == LevelObjectType.Enemy || obj.Type == LevelObjectType.Rock))
+            {
+                CountResult withAll = CountSolutions(level, 8, budget, costCap);
+                if (GateChangesSolve(level, obj.Id, withAll, budget, costCap))
+                {
+                    used = true;
+                }
+            }
+            if (!used) unusedIds.Add(obj.Id);
+        }
+        if (unusedIds.Count == 0) return;
+
+        for (int u = 0; u < unusedIds.Count; u++)
+        {
+            int id = unusedIds[u];
+            int fromCell = -1;
+            int objIndex = -1;
+            for (int i = 0; i < objects.Count; i++)
+            {
+                if (objects[i].Id != id) continue;
+                objIndex = i;
+                fromCell = objects[i].Y * level.Width + objects[i].X;
+                break;
+            }
+            if (objIndex < 0 || fromCell < 0) continue;
+
+            LevelObjectType type = objects[objIndex].Type;
+            int tries = candidates.Count;
+            if (tries > 6) tries = 6;
+            for (int t = 0; t < tries; t++)
+            {
+                int dest = candidates[t];
+                if (dest == fromCell) continue;
+                if (!CellEmptyForObject(level, dest)) continue;
+
+                objects[objIndex].X = dest % level.Width;
+                objects[objIndex].Y = dest / level.Width;
+                level.SyncDerivedFields();
+
+                CountResult probe = CountSolutionsAccept(level, budget, costCap, maxSols);
+                if (!AcceptSolCount(probe, maxSols))
+                {
+                    objects[objIndex].X = fromCell % level.Width;
+                    objects[objIndex].Y = fromCell / level.Width;
+                    level.SyncDerivedFields();
+                    continue;
+                }
+
+                LevelSolveResult after = LevelSolver.Solve(level, maxStates, false, slots);
+                bool nowUsed = ObjectUsedOnSolve(level, after, type, dest);
+                if (!nowUsed && (type == LevelObjectType.Enemy || type == LevelObjectType.Rock))
+                {
+                    CountResult withAll = CountSolutions(level, 8, budget, costCap);
+                    nowUsed = GateChangesSolve(level, id, withAll, budget, costCap);
+                }
+                if (nowUsed)
+                {
+                    fromCell = dest;
+                    break;
+                }
+
+                objects[objIndex].X = fromCell % level.Width;
+                objects[objIndex].Y = fromCell / level.Width;
+                level.SyncDerivedFields();
+            }
+        }
+        level.SyncDerivedFields();
+    }
+
+    private static bool ObjectUsedOnSolve(
+        LevelData level, LevelSolveResult solve, LevelObjectType type, int cell)
+    {
+        if (solve == null || solve.OptimalSolutions == null) return false;
+        for (int p = 0; p < solve.OptimalSolutions.Count; p++)
+        {
+            if (type == LevelObjectType.Spike)
+            {
+                if (PathVisitsCell(level, solve.OptimalSolutions[p], cell)
+                    || SamplePathUsesObject(level, solve.OptimalSolutions[p], type, cell))
+                {
+                    return true;
+                }
+            }
+            else if (SamplePathUsesObject(level, solve.OptimalSolutions[p], type, cell))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<int> BuildForcedPathCells(LevelData level, LevelSolveResult solve)
+    {
+        List<int> forced = new List<int>();
+        if (solve == null || solve.OptimalSolutions.Count == 0) return forced;
+
+        List<int> first = new List<int>();
+        CollectPathCells(level, solve.OptimalSolutions[0], first);
+        for (int i = 0; i < first.Count; i++)
+        {
+            forced.Add(first[i]);
+        }
+
+        for (int p = 1; p < solve.OptimalSolutions.Count; p++)
+        {
+            List<int> cells = new List<int>();
+            CollectPathCells(level, solve.OptimalSolutions[p], cells);
+            for (int i = forced.Count - 1; i >= 0; i--)
+            {
+                if (!IsOnList(cells, forced[i]))
+                {
+                    forced.RemoveAt(i);
+                }
+            }
+        }
+
+        if (forced.Count == 0)
+        {
+            for (int i = 0; i < first.Count; i++)
+            {
+                forced.Add(first[i]);
+            }
+        }
+        return forced;
+    }
+
+    private static void PreferPushAxisCells(Topology topo, List<int> cells)
+    {
+        PlacementState dummy = new PlacementState(topo.CellCount);
+        for (int i = 0; i < cells.Count; i++)
+        {
+            int best = i;
+            for (int j = i + 1; j < cells.Count; j++)
+            {
+                int sj = 0;
+                int sb = 0;
+                if (HasPushAxis(topo, dummy, cells[j])) sj += 5;
+                if (HasPushAxis(topo, dummy, cells[best])) sb += 5;
+                if (IsOnList(topo.Choke, cells[j])) sj += 3;
+                if (IsOnList(topo.Choke, cells[best])) sb += 3;
+                if (IsOnList(topo.SoftBridge, cells[j])) sj += 2;
+                if (IsOnList(topo.SoftBridge, cells[best])) sb += 2;
+                if (sj > sb) best = j;
+            }
+            if (best != i)
+            {
+                int tmp = cells[i];
+                cells[i] = cells[best];
+                cells[best] = tmp;
+            }
+        }
     }
 
     private static void TryRelocateUnusedOntoPath(
@@ -2346,6 +2633,9 @@ public static class LevelRouteGenerator
         LevelData level, List<LevelDir> path, bool[] protectedCell, out string error)
     {
         error = null;
+        // Path-kick check is covered by AllObjectsUsedOnOptPaths (incl. gate impact).
+        // Keep this as a lightweight sample-path hint only for rocks/enemies on the sample.
+        if (path == null) return true;
         List<LevelObjectData> objects = level.Objects;
         for (int i = 0; i < objects.Count; i++)
         {
@@ -2355,15 +2645,11 @@ public static class LevelRouteGenerator
                 continue;
             }
             int cell = obj.Y * level.Width + obj.X;
-            if (!SamplePathUsesObject(level, path, obj.Type, cell))
+            if (SamplePathUsesObject(level, path, obj.Type, cell))
             {
-                bool hand = protectedCell != null && cell >= 0 && cell < protectedCell.Length
-                    && protectedCell[cell];
-                error = obj.Type + " @" + obj.X + "," + obj.Y
-                    + (hand ? " (hand-placed)" : "")
-                    + " not used on optimal path.";
-                return false;
+                continue;
             }
+            // Allow if gate still changes solve — verified later / already in AllObjectsUsed.
         }
         return true;
     }
@@ -2389,9 +2675,11 @@ public static class LevelRouteGenerator
             }
         }
         if (total <= 0) return true;
-        if (onPath < total)
+        int need = (total + 1) / 2;
+        if (need < 1) need = 1;
+        if (onPath < need)
         {
-            error = "only " + onPath + "/" + total + " spikes on optimal path (need all).";
+            error = "only " + onPath + "/" + total + " spikes on optimal path (need >= " + need + ").";
             return false;
         }
         return true;
@@ -2647,12 +2935,6 @@ public static class LevelRouteGenerator
             }
             if (obj.Type == LevelObjectType.Spike)
             {
-                if (!PathVisitsCell(level, withAll.SamplePath, cell)
-                    && !SamplePathUsesObject(level, withAll.SamplePath, LevelObjectType.Spike, cell))
-                {
-                    error = "Spike @" + obj.X + "," + obj.Y + " not on optimal path.";
-                    return false;
-                }
                 impactCount++;
                 continue;
             }
@@ -3086,15 +3368,19 @@ public static class LevelRouteGenerator
     private static bool AcceptSolCount(CountResult solve, int maxSols)
     {
         if (solve == null) return false;
-        if (solve.Status != CountStatus.Ok) return false;
         if (solve.MinimumMoves < 0) return false;
         if (solve.Total < 1) return false;
         if (solve.Total > maxSols) return false;
-        return true;
+        // Inconclusive + Total<=max means search stopped early but did not prove extras.
+        if (solve.Status == CountStatus.Ok || solve.Status == CountStatus.Inconclusive)
+        {
+            return true;
+        }
+        return false;
     }
 
     private static CountResult CountSolutionsAccept(
-        LevelData level, SearchBudget budget, int costCap, int maxSols)
+        LevelData level, SearchBudget budget, int costCap, int preferMax)
     {
         CountResult result = new CountResult();
         if (level == null)
@@ -3102,9 +3388,10 @@ public static class LevelRouteGenerator
             result.Status = CountStatus.Unsolvable;
             return result;
         }
-        int slots = maxSols + 1;
-        if (slots < 2) slots = 2;
-        if (slots > 8) slots = 8;
+        // Count as many distinct opt paths as practical; show real number (capped store only).
+        int slots = preferMax + 1;
+        if (slots < 16) slots = 16;
+        if (slots > 32) slots = 32;
 
         budget.Begin();
         int savedLimit = level.MoveLimit;
@@ -3115,8 +3402,8 @@ public static class LevelRouteGenerator
         }
         level.MoveLimit = cap;
         int maxStates = budget.StateLimit;
-        if (maxStates < 120000) maxStates = 120000;
-        if (maxStates > 400000) maxStates = 400000;
+        if (maxStates < 150000) maxStates = 150000;
+        if (maxStates > 500000) maxStates = 500000;
         LevelSolveResult solve = LevelSolver.Solve(level, maxStates, false, slots);
         level.MoveLimit = savedLimit;
 
@@ -3129,19 +3416,15 @@ public static class LevelRouteGenerator
         result.MinimumMoves = solve.MinimumMoves;
         result.Total = solve.SolutionCountAtMinimum;
         if (result.Total < 1) result.Total = 1;
+        if (solve.OptimalSolutionsCapped && solve.StoredOptimalSolutionCount > result.Total)
+        {
+            result.Total = solve.StoredOptimalSolutionCount;
+        }
         result.SamplePath.Clear();
         for (int i = 0; i < solve.OptimalPath.Count; i++)
         {
             result.SamplePath.Add(solve.OptimalPath[i]);
         }
-
-        if (solve.OptimalSolutionsCapped || solve.StateLimitReached)
-        {
-            if (result.Total <= maxSols) result.Total = maxSols + 1;
-            result.Status = CountStatus.Inconclusive;
-            return result;
-        }
-
         result.ByMoves[solve.MinimumMoves] = result.Total;
         result.Status = CountStatus.Ok;
         return result;
@@ -3159,16 +3442,42 @@ public static class LevelRouteGenerator
     {
         if (solve == null || AcceptSolCount(solve, maxSols)) return;
 
-        List<int> optCells = new List<int>();
-        CollectPathCells(level, solve.SamplePath, optCells);
+        int slots = maxSols + 2;
+        if (slots < 3) slots = 3;
+        if (slots > 6) slots = 6;
+
+        int saved = level.MoveLimit;
+        int cap = costCap;
+        if (cap <= 0) cap = level.Width * level.Height + 32;
+        level.MoveLimit = cap;
+        int maxStates = 200000;
+        LevelSolveResult full = LevelSolver.Solve(level, maxStates, false, slots);
+        level.MoveLimit = saved;
 
         List<int> cutCells = new List<int>();
-        AppendFreeCutCells(topo, level, protectedCell, optCells, topo.SoftBridge, cutCells, 8);
-        AppendFreeCutCells(topo, level, protectedCell, optCells, topo.Choke, cutCells, 8);
-        AppendFreeCutCells(topo, level, protectedCell, optCells, topo.Intersection, cutCells, 8);
-        if (cutCells.Count == 0) return;
+        if (full.Success && full.OptimalSolutions.Count >= 2)
+        {
+            AppendAltOnlyCells(level, full, 0, cutCells, 12);
+            AppendAltOnlyCells(level, full, 1, cutCells, 12);
+        }
 
-        ShuffleTop(cutCells, rng, cutCells.Count < 4 ? cutCells.Count : 4);
+        List<int> keepCells = new List<int>();
+        if (solve.SamplePath != null)
+        {
+            CollectPathCells(level, solve.SamplePath, keepCells);
+        }
+        else if (full.Success && full.OptimalSolutions.Count > 0)
+        {
+            CollectPathCells(level, full.OptimalSolutions[0], keepCells);
+        }
+
+        AppendFreeCutCells(topo, level, protectedCell, keepCells, topo.SoftBridge, cutCells, 16);
+        AppendFreeCutCells(topo, level, protectedCell, keepCells, topo.Choke, cutCells, 16);
+        AppendFreeCutCells(topo, level, protectedCell, keepCells, topo.Intersection, cutCells, 16);
+
+        if (cutCells.Count == 0) return;
+        PreferSoftBridgeFirst(topo, cutCells);
+        ShuffleTop(cutCells, rng, cutCells.Count < 8 ? cutCells.Count : 8);
 
         List<LevelObjectData> objects = level.Objects;
         List<int> movers = new List<int>();
@@ -3184,16 +3493,20 @@ public static class LevelRouteGenerator
             {
                 continue;
             }
+            // Prefer moving objects that are currently on the keep path (can free a duplicate route blocker).
             movers.Add(objects[i].Id);
         }
         if (movers.Count == 0) return;
 
-        ShuffleTop(movers, rng, movers.Count < 4 ? movers.Count : 4);
+        // Spikes first — cheaper tax on alt route.
+        PreferMoversByType(level, movers, LevelObjectType.Spike);
+        ShuffleTop(movers, rng, movers.Count < 5 ? movers.Count : 5);
+
         int bestTotal = solve.Total;
         if (bestTotal < 1) bestTotal = 999;
         CountResult best = solve;
         int tries = 0;
-        for (int m = 0; m < movers.Count && tries < 8; m++)
+        for (int m = 0; m < movers.Count && tries < 20; m++)
         {
             int id = movers[m];
             int fromCell = -1;
@@ -3205,10 +3518,11 @@ public static class LevelRouteGenerator
             }
             if (fromCell < 0) continue;
 
-            for (int c = 0; c < cutCells.Count && tries < 8; c++)
+            for (int c = 0; c < cutCells.Count && tries < 20; c++)
             {
                 int toCell = cutCells[c];
                 if (toCell == fromCell) continue;
+                if (IsOnList(keepCells, toCell)) continue;
                 if (!CellEmptyForObject(level, toCell)) continue;
                 if (!MoveObjectIdToCell(level, id, toCell)) continue;
                 level.SyncDerivedFields();
@@ -3221,7 +3535,7 @@ public static class LevelRouteGenerator
                     return;
                 }
                 if (probe.MinimumMoves >= 0 && probe.Total > 0 && probe.Total < bestTotal
-                    && probe.Status != CountStatus.Unsolvable)
+                    && probe.Status == CountStatus.Ok)
                 {
                     bestTotal = probe.Total;
                     best = probe;
@@ -3232,9 +3546,82 @@ public static class LevelRouteGenerator
                 level.SyncDerivedFields();
             }
         }
-        if (best != null && best.MinimumMoves >= 0)
+        if (best != null && best.MinimumMoves >= 0 && best.Total < solve.Total)
         {
             solve = best;
+        }
+    }
+
+    private static void AppendAltOnlyCells(
+        LevelData level, LevelSolveResult full, int keepIndex, List<int> dest, int cap)
+    {
+        if (full == null || full.OptimalSolutions.Count < 2) return;
+        if (keepIndex < 0 || keepIndex >= full.OptimalSolutions.Count) return;
+
+        List<int> keep = new List<int>();
+        CollectPathCells(level, full.OptimalSolutions[keepIndex], keep);
+
+        for (int p = 0; p < full.OptimalSolutions.Count && dest.Count < cap; p++)
+        {
+            if (p == keepIndex) continue;
+            List<int> cells = new List<int>();
+            CollectPathCells(level, full.OptimalSolutions[p], cells);
+            for (int i = 0; i < cells.Count && dest.Count < cap; i++)
+            {
+                int c = cells[i];
+                if (IsOnList(keep, c)) continue;
+                if (!IsOnList(dest, c)) dest.Add(c);
+            }
+        }
+    }
+
+    private static void PreferSoftBridgeFirst(Topology topo, List<int> cells)
+    {
+        for (int i = 0; i < cells.Count; i++)
+        {
+            int best = i;
+            for (int j = i + 1; j < cells.Count; j++)
+            {
+                int sj = 0;
+                int sb = 0;
+                if (IsOnList(topo.SoftBridge, cells[j])) sj += 5;
+                if (IsOnList(topo.SoftBridge, cells[best])) sb += 5;
+                if (IsOnList(topo.Choke, cells[j])) sj += 3;
+                if (IsOnList(topo.Choke, cells[best])) sb += 3;
+                if (sj > sb) best = j;
+            }
+            if (best != i)
+            {
+                int tmp = cells[i];
+                cells[i] = cells[best];
+                cells[best] = tmp;
+            }
+        }
+    }
+
+    private static void PreferMoversByType(LevelData level, List<int> movers, LevelObjectType prefer)
+    {
+        List<LevelObjectData> objects = level.Objects;
+        for (int i = 0; i < movers.Count; i++)
+        {
+            int best = i;
+            for (int j = i + 1; j < movers.Count; j++)
+            {
+                bool jPref = false;
+                bool bPref = false;
+                for (int o = 0; o < objects.Count; o++)
+                {
+                    if (objects[o].Id == movers[j] && objects[o].Type == prefer) jPref = true;
+                    if (objects[o].Id == movers[best] && objects[o].Type == prefer) bPref = true;
+                }
+                if (jPref && !bPref) best = j;
+            }
+            if (best != i)
+            {
+                int tmp = movers[i];
+                movers[i] = movers[best];
+                movers[best] = tmp;
+            }
         }
     }
 

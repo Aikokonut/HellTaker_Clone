@@ -362,8 +362,8 @@ public sealed class LevelEditorWindow : EditorWindow
     {
         GUILayout.Label("Generator (Path-First)", EditorStyles.boldLabel);
         EditorGUILayout.HelpBox(
-            "Trap/bait = polish. Mọi E/R/S phải dùng trên optimal. Attempts ≤60.\n"
-            + "MaxTarget≤2. Object thừa / không tăng cost → reject.",
+            "Max Target Solutions = mục tiêu mềm (ít sols = điểm cao hơn), không khóa.\n"
+            + "Spike ≥ nửa trên path. Calibrate chỉ lấy count E/R/S từ gốc.",
             MessageType.Info);
 
         EditorGUI.BeginChangeCheck();
@@ -404,6 +404,7 @@ public sealed class LevelEditorWindow : EditorWindow
                     genSpikeCount = cal.SpikeCount;
                     genCostSlack = cal.CostSlack;
                     genMaxTargetSolutions = cal.RecommendedMaxTargetSolutions;
+                    if (genMaxTargetSolutions < 1) genMaxTargetSolutions = 1;
                     genMaxAttempts = cal.RecommendedAttempts;
                     statusMessage = cal.Message;
                 }
@@ -431,8 +432,7 @@ public sealed class LevelEditorWindow : EditorWindow
         EditorGUILayout.HelpBox(
             "Chỉ giữ layout khác nhau. Có bao nhiêu unique thì hiện bấy nhiêu (≤ max).",
             MessageType.None);
-        genMaxTargetSolutions = EditorGUILayout.IntField("Max Target Solutions", genMaxTargetSolutions);
-        if (genMaxTargetSolutions > 2) genMaxTargetSolutions = 2;
+        genMaxTargetSolutions = EditorGUILayout.IntField("Max Target Solutions (prefer)", genMaxTargetSolutions);
         if (genMaxTargetSolutions < 1) genMaxTargetSolutions = 1;
         EditorGUILayout.HelpBox(
             "Max Target Solutions = số lời giải tối ưu tối đa (1 = unique).\n"
